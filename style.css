@@ -1,0 +1,115 @@
+:root { --primary: #0d6efd; --bg: #f8f9fa; --text: #212529; --border: #dee2e6; }
+body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+.container { max-width: 1200px; margin: 0 auto; }
+
+/* Header & Toolbar */
+header { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+.brand { font-size: 1.5rem; font-weight: bold; color: var(--primary); }
+.badge { background: #ffc107; color: #000; font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; vertical-align: middle; }
+
+.toolbar { display: flex; justify-content: space-between; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+#search-input { padding: 10px; width: 250px; border: 1px solid var(--border); border-radius: 6px; }
+.btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; color: white; font-size: 0.95rem; }
+.btn-primary { background: var(--primary); }
+.btn-secondary { background: #6c757d; }
+
+/* Grid */
+.member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
+
+/* Card */
+.card {
+    background: white; border: 1px solid var(--border); border-radius: 10px; padding: 15px;
+    cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden;
+}
+.card:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+
+.card.alumni { background: #f5f5f5; color: #666; border-color: #eee; }
+.card.alumni h3 { color: #555; }
+.card.alumni::after {
+    content: "ALUMNI"; position: absolute; bottom: -10px; right: -5px;
+    font-size: 3rem; font-weight: bold; color: rgba(0,0,0,0.05); pointer-events: none;
+}
+
+.card-header-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.8rem; }
+.role-badge { padding: 2px 6px; border-radius: 4px; background: #e9ecef; color: #495057; }
+.role-badge.Admin { background: #cfe2ff; color: #084298; }
+.status-text.Active { color: #198754; font-weight: bold; }
+.status-text.Alumni { color: #6c757d; }
+
+.card h3 { margin: 0 0 10px 0; font-size: 1.1rem; }
+.card h3 small { font-size: 0.85em; color: #888; margin-left: 5px; font-weight: normal; }
+
+.card-body p { margin: 6px 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; }
+.icon { opacity: 0.6; min-width: 20px; text-align: center; }
+
+/* --- Email 樣式優化 (重點改動) --- */
+.email-row {
+    cursor: pointer;
+    transition: all 0.2s;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 10px 0 0 0 !important; /* 增加上方間距 */
+    /* 預設樣式：淺灰背景與邊框，看起來就像可點擊的區域 */
+    background: #f8f9fa; 
+    border: 1px solid #e9ecef;
+    display: flex;
+    align-items: center;
+    justify-content: space-between; /* 讓複製 icon 靠右 */
+}
+
+.email-row:hover {
+    background: #e2e6ea; /* 滑鼠滑入變深色 */
+    border-color: #dae0e5;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.email-text {
+    flex-grow: 1; /* 佔據中間所有空間 */
+    margin: 0 10px;
+    word-break: break-all;
+}
+
+.start-icon { opacity: 0.7; }
+
+/* 複製按鈕 icon 樣式 */
+.copy-btn-icon {
+    opacity: 0.5;
+    transition: opacity 0.2s, color 0.2s;
+    font-size: 1.1em;
+}
+.email-row:hover .copy-btn-icon {
+    opacity: 1;
+    color: var(--primary); /* 滑入時變色提醒 */
+}
+
+/* 複製成功的視覺回饋 */
+.email-row.copied {
+    background: #d1e7dd !important; /* 綠色背景 */
+    border-color: #badbcc !important;
+    color: #0f5132;
+}
+.email-row.copied .copy-btn-icon {
+    color: #0f5132;
+    content: "✅"; /* 這裡其實換不了 icon，但顏色變了就夠了 */
+}
+/* -------------------------------- */
+
+
+.loading, .empty { grid-column: 1/-1; text-align: center; padding: 30px; color: #888; }
+
+/* Modal */
+.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
+.hidden { display: none !important; }
+.modal-content { background: white; padding: 25px; border-radius: 12px; width: 500px; max-width: 95%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
+
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+.close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #aaa; }
+
+.modal-body { display: flex; flex-direction: column; gap: 15px; }
+.form-row { display: flex; gap: 15px; }
+.form-row .form-group { flex: 1; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-group label { font-size: 0.85rem; font-weight: 600; color: #555; }
+.form-group input, .form-group select { padding: 8px; border: 1px solid #ced4da; border-radius: 6px; width: 100%; box-sizing: border-box; }
+
+.modal-footer { margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px; }

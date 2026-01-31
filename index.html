@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOODLAB - 人員管理</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="brand">GOODLAB <span class="badge">Member v1.1</span></div>
+        </header>
+
+        <main>
+            <div class="toolbar">
+                <input type="text" id="search-input" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()">
+                <div class="actions">
+                    <button onclick="app.openModal()" class="btn btn-primary">➕ 新增成員</button>
+                    <button onclick="app.fetchData()" class="btn btn-secondary">🔄 重新整理</button>
+                </div>
+            </div>
+
+            <div id="member-grid" class="member-grid">
+                <div class="loading">載入中...</div>
+            </div>
+        </main>
+    </div>
+
+    <div id="modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">編輯成員</h3>
+                <button onclick="app.closeModal()" class="close-btn">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>學號 (Student_ID)</label>
+                    <input type="text" id="Student_ID" placeholder="F12345678">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>學位 (Degree)</label>
+                        <select id="Degree">
+                            <option value="PhD">PhD (博班)</option>
+                            <option value="Master">Master (碩班)</option>
+                            <option value="Undergrad">Undergrad (專題生)</option>
+                            <option value="Prof">Professor</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>中文名字 (Name_Ch)</label>
+                        <input type="text" id="Name_Ch">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>英文名字 (First Name)</label>
+                        <input type="text" id="Name_En" placeholder="ex: Chin-Chuan">
+                    </div>
+                    <div class="form-group">
+                        <label>英文姓氏 (Surname)</label>
+                        <input type="text" id="Surname_En" placeholder="ex: Wu">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>系所 (Department)</label>
+                        <input type="text" id="Department" list="dept-list">
+                        <datalist id="dept-list">
+                            <option value="電子所"><option value="光電所"><option value="重點科技學院">
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label>狀態 (Status)</label>
+                        <select id="Status">
+                            <option value="Active">Active (在學)</option>
+                            <option value="Alumni">Alumni (畢業)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>入學日期 (Enrollment)</label>
+                        <input type="date" id="Enrollment_Date">
+                    </div>
+                    <div class="form-group">
+                        <label>離校日期 (Leave)</label>
+                        <input type="date" id="Leave_Date">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>電話 (Phone)</label>
+                        <input type="text" id="Phone">
+                    </div>
+                    <div class="form-group">
+                        <label>信箱 (Email)</label>
+                        <input type="text" id="Email">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>權限 (Role)</label>
+                    <select id="Role">
+                        <option value="User">User</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                </div>
+                
+                </div>
+
+            <div class="modal-footer">
+                <button onclick="app.saveMember()" class="btn btn-primary" id="btn-save">儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
