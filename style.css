@@ -17,99 +17,182 @@ header { margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
 .member-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px; }
 
 /* Card */
-.card {
-    background: white; border: 1px solid var(--border); border-radius: 10px; padding: 15px;
-    cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden;
-}
+.card { background: white; border: 1px solid var(--border); border-radius: 10px; padding: 15px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; }
 .card:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-
 .card.alumni { background: #f5f5f5; color: #666; border-color: #eee; }
 .card.alumni h3 { color: #555; }
-.card.alumni::after {
-    content: "ALUMNI"; position: absolute; bottom: -10px; right: -5px;
-    font-size: 3rem; font-weight: bold; color: rgba(0,0,0,0.05); pointer-events: none;
-}
-
+.card.alumni::after { content: "ALUMNI"; position: absolute; bottom: -10px; right: -5px; font-size: 3rem; font-weight: bold; color: rgba(0,0,0,0.05); pointer-events: none; }
 .card-header-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.8rem; }
 .role-badge { padding: 2px 6px; border-radius: 4px; background: #e9ecef; color: #495057; }
 .role-badge.Admin { background: #cfe2ff; color: #084298; }
 .status-text.Active { color: #198754; font-weight: bold; }
 .status-text.Alumni { color: #6c757d; }
-
 .card h3 { margin: 0 0 10px 0; font-size: 1.1rem; }
 .card h3 small { font-size: 0.85em; color: #888; margin-left: 5px; font-weight: normal; }
-
 .card-body p { margin: 6px 0; font-size: 0.9rem; display: flex; align-items: center; gap: 8px; }
 .icon { opacity: 0.6; min-width: 20px; text-align: center; }
 
-/* --- Email 樣式優化 (重點改動) --- */
-.email-row {
-    cursor: pointer;
-    transition: all 0.2s;
-    border-radius: 6px;
-    padding: 8px 10px;
-    margin: 10px 0 0 0 !important; /* 增加上方間距 */
-    /* 預設樣式：淺灰背景與邊框，看起來就像可點擊的區域 */
-    background: #f8f9fa; 
-    border: 1px solid #e9ecef;
-    display: flex;
-    align-items: center;
-    justify-content: space-between; /* 讓複製 icon 靠右 */
-}
-
-.email-row:hover {
-    background: #e2e6ea; /* 滑鼠滑入變深色 */
-    border-color: #dae0e5;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-}
-
-.email-text {
-    flex-grow: 1; /* 佔據中間所有空間 */
-    margin: 0 10px;
-    word-break: break-all;
-}
-
+/* Email Style */
+.email-row { cursor: pointer; transition: all 0.2s; border-radius: 6px; padding: 8px 10px; margin: 10px 0 0 0 !important; background: #f8f9fa; border: 1px solid #e9ecef; display: flex; align-items: center; justify-content: space-between; }
+.email-row:hover { background: #e2e6ea; border-color: #dae0e5; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+.email-text { flex-grow: 1; margin: 0 10px; word-break: break-all; }
 .start-icon { opacity: 0.7; }
+.copy-btn-icon { opacity: 0.5; transition: opacity 0.2s, color 0.2s; font-size: 1.1em; }
+.email-row:hover .copy-btn-icon { opacity: 1; color: var(--primary); }
+.email-row.copied { background: #d1e7dd !important; border-color: #badbcc !important; color: #0f5132; }
+.email-row.copied .copy-btn-icon { color: #0f5132; content: "✅"; }
 
-/* 複製按鈕 icon 樣式 */
-.copy-btn-icon {
-    opacity: 0.5;
-    transition: opacity 0.2s, color 0.2s;
-    font-size: 1.1em;
+/* Loading & Empty */
+.loading, .empty { 
+    grid-column: 1/-1; 
+    text-align: center; 
+    padding: 30px; 
+    color: #888; 
+    /* ★ 修正：確保 Loading 文字不換行 */
+    white-space: nowrap; 
 }
-.email-row:hover .copy-btn-icon {
-    opacity: 1;
-    color: var(--primary); /* 滑入時變色提醒 */
-}
-
-/* 複製成功的視覺回饋 */
-.email-row.copied {
-    background: #d1e7dd !important; /* 綠色背景 */
-    border-color: #badbcc !important;
-    color: #0f5132;
-}
-.email-row.copied .copy-btn-icon {
-    color: #0f5132;
-    content: "✅"; /* 這裡其實換不了 icon，但顏色變了就夠了 */
-}
-/* -------------------------------- */
-
-
-.loading, .empty { grid-column: 1/-1; text-align: center; padding: 30px; color: #888; }
 
 /* Modal */
 .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 100; }
 .hidden { display: none !important; }
 .modal-content { background: white; padding: 25px; border-radius: 12px; width: 500px; max-width: 95%; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; }
-
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
 .close-btn { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #aaa; }
-
 .modal-body { display: flex; flex-direction: column; gap: 15px; }
 .form-row { display: flex; gap: 15px; }
 .form-row .form-group { flex: 1; }
 .form-group { display: flex; flex-direction: column; gap: 5px; }
 .form-group label { font-size: 0.85rem; font-weight: 600; color: #555; }
 .form-group input, .form-group select { padding: 8px; border: 1px solid #ced4da; border-radius: 6px; width: 100%; box-sizing: border-box; }
-
 .modal-footer { margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px; }
+
+/* Header & Nav */
+header { margin-bottom: 20px; display: flex; flex-direction: column; gap: 15px; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+.nav-tabs { display: flex; gap: 10px; border-bottom: 2px solid #eee; padding-bottom: 0; }
+.nav-btn { background: none; border: none; padding: 10px 20px; font-size: 1rem; color: #666; cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; font-weight: 600; }
+.nav-btn:hover { color: var(--primary); background: #f8f9fa; border-radius: 6px 6px 0 0; }
+.nav-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+/* Page Sections & Filters */
+.page-section { display: none; animation: fadeIn 0.3s; }
+.page-section.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.filters { display: flex; gap: 10px; }
+#search-inst { width: 200px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+#filter-location { padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+
+/* Table Styles */
+.table-container { background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 600px; }
+th { background: #f8f9fa; text-align: left; padding: 12px 15px; color: #555; font-weight: 600; border-bottom: 2px solid #eee; }
+td { padding: 12px 15px; border-bottom: 1px solid #eee; color: #333; }
+tr:last-child td { border-bottom: none; }
+tr:hover { background-color: #f8f9fa; }
+th.sortable { cursor: pointer; transition: background-color 0.2s; user-select: none; }
+th.sortable:hover { background-color: #e9ecef; color: var(--primary); }
+th.sortable:active { background-color: #dee2e6; }
+.status-badge { padding: 4px 8px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
+.status-badge.active { background: #d1e7dd; color: #0f5132; }
+.status-badge.inactive { background: #f8d7da; color: #842029; }
+
+/* Log Styles */
+.log-row.open { background-color: #fff5f5; border-left: 5px solid #dc3545; }
+.log-row.open:hover { background-color: #ffe0e0; }
+.log-row.closed { background-color: #f8f9fa; border-left: 5px solid #198754; opacity: 0.8; }
+.resolve-btn { cursor: pointer; font-size: 1.2rem; background: none; border: 1px solid #ccc; border-radius: 4px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+.resolve-btn:hover { background-color: #d1e7dd; border-color: #198754; }
+.resolve-btn.checked { background-color: #198754; color: white; border-color: #198754; }
+.btn-danger { background-color: #dc3545; color: white; }
+.btn-danger:hover { background-color: #bb2d3b; }
+textarea { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; box-sizing: border-box; font-family: inherit; resize: vertical; min-height: 80px; }
+.status-filter-group { display: flex; background-color: #e9ecef; padding: 4px; border-radius: 8px; gap: 4px; }
+.filter-chip { border: none; background: transparent; padding: 6px 14px; border-radius: 6px; font-size: 0.9rem; color: #6c757d; cursor: pointer; font-weight: 600; transition: all 0.2s ease; }
+.filter-chip:hover { color: #495057; background-color: rgba(255,255,255,0.5); }
+.filter-chip.active { background-color: white; color: #212529; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+.filter-chip[data-val="Open"].active { color: #dc3545; }
+.filter-chip[data-val="Closed"].active { color: #198754; }
+
+@media (max-width: 768px) {
+    body { padding: 5px; } /* 減少邊距 */
+
+    /* 1. Mobile Nav */
+    .nav-btn { font-size: 1.5rem; padding: 8px 12px; display: flex; align-items: center; gap: 5px; justify-content: center; }
+    .nav-btn span { display: none; }
+    .nav-btn.active span { display: inline; font-size: 1rem; }
+    
+    /* 2. Mobile Toolbar */
+    .toolbar { flex-direction: column; gap: 10px; }
+    .filters { flex-direction: column; width: 100%; gap: 10px; }
+    #search-inst, #search-log, #search-member, .status-filter-group { width: 100%; box-sizing: border-box; }
+    
+    .status-filter-group { justify-content: space-between; }
+    .filter-chip { flex: 1; text-align: center; padding: 6px 4px; } /* 按鈕緊湊點 */
+    .actions { display: flex; gap: 10px; width: 100%; }
+    .actions .btn { flex: 1; }
+    
+    /* 3. Mobile Table (極致壓縮版) */
+    
+    /* ★ 關鍵：覆蓋表格寬度，允許自動縮放 */
+    table { min-width: auto; }
+    .table-container { overflow-x: hidden; } /* 禁止橫向捲動 */
+    
+    /* 縮小內距與字體，讓畫面塞得下 */
+    th, td { 
+        padding: 8px 4px; 
+        font-size: 0.85rem; 
+        white-space: normal; /* 允許換行 */
+        word-break: break-word; /* 長單字換行 */
+    }
+    
+    /* --- 儀器表格 (Inst) --- */
+    /* 顯示: 狀態(1), 名稱(2), 區域(3), 操作(6) */
+    /* 隱藏: 廠商(4), 負責人(5) -> 為了塞進手機畫面，建議負責人也隱藏 */
+    #inst-table th:nth-child(4), #inst-table td:nth-child(4),
+    #inst-table th:nth-child(5), #inst-table td:nth-child(5) { display: none; }
+    
+    /* --- 維修紀錄表格 (Log) --- */
+    /* 顯示: 解決(1), 緊急(2), 日期(3), 儀器(4), 操作(8) */
+    /* 隱藏: 問題(5), 解方(6), 負責人(7) */
+    /* ★ 修正：第 8 欄 (操作按鈕) 不隱藏了！ */
+    #log-table th:nth-child(5), #log-table td:nth-child(5),
+    #log-table th:nth-child(6), #log-table td:nth-child(6),
+    #log-table th:nth-child(7), #log-table td:nth-child(7) { display: none; }
+    
+    /* 狀態顯示切換 */
+    .desktop-status { display: none; }
+    .mobile-status { display: inline; font-size: 1.2rem; }
+    
+    /* 強制設定欄位寬度比例 (選用，讓版面更穩) */
+    #log-table th:nth-child(1) { width: 30px; } /* 勾選 */
+    #log-table th:nth-child(2) { width: 30px; } /* 緊急 */
+    #log-table th:nth-child(3) { width: 70px; } /* 日期 */
+    /* 儀器名稱自動 */
+    #log-table th:last-child { width: 40px; } /* 編輯鈕 */
+}
+
+/* --- 人員卡片標頭優化 --- */
+.card-header-flex {
+    display: flex;
+    justify-content: space-between; /* 名字在左，標籤在右 */
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.card-header-flex h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    line-height: 1.3;
+    flex: 1; /* 讓名字佔據剩餘空間 */
+}
+
+/* 統一 Admin 標籤樣式 */
+.role-badge.Admin {
+    background: #cfe2ff;
+    color: #084298;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    white-space: nowrap;
+    margin-left: 10px;
+}
