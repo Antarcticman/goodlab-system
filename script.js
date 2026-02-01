@@ -134,9 +134,6 @@ const app = {
             return `
             <tr>
                 <td>
-                    <span class="desktop-status status-badge ${isActive ? 'active' : 'inactive'}">
-                        ${isActive ? 'Active' : 'Stop'}
-                    </span>
                     <span class="mobile-status">
                         ${isActive ? '🟢' : '🔴'}
                     </span>
