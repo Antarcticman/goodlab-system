@@ -135,7 +135,7 @@ const app = {
             <tr>
                 <td>
                     <span class="mobile-status">
-                        ${isActive ? '🟢' : '🔴'}
+                        ${isActive ? ' 🟢' : ' 🔴'}
                     </span>
                 </td>
                 <td style="font-weight:600">${inst.Name}</td>
