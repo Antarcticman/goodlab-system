@@ -9,36 +9,42 @@
 <body>
     <div class="container">
         <header>
-            <div class="brand">GOODLAB <span class="badge">v3.1</span></div>
+            <div class="brand">GOODLAB <span class="badge">v4.0</span></div>
             <nav class="nav-tabs">
                 <button class="nav-btn" onclick="app.switchTab('members')">👥 <span>人員管理</span></button>
                 <button class="nav-btn" onclick="app.switchTab('instruments')">🔬 <span>儀器設備</span></button>
-                <button class="nav-btn active" onclick="app.switchTab('logs')">🛠️ <span>維修紀錄</span></button>
+                <button class="nav-btn" onclick="app.switchTab('logs')">🛠️ <span>維修紀錄</span></button>
+                <button class="nav-btn active" onclick="app.switchTab('accounting')">💰 <span>公積金</span></button>
             </nav>
         </header>
 
         <main id="page-members" class="page-section hidden">
-             <div class="toolbar">
+            <div class="toolbar">
                 <input type="text" id="search-member" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()">
                 <div class="actions">
                     <button onclick="app.openMemberModal()" class="btn btn-primary">➕ 新增成員</button>
                     <button onclick="app.fetchData()" class="btn btn-secondary">🔄 重新整理</button>
                 </div>
             </div>
-            <div id="member-grid" class="member-grid"><div class="loading">載入中...</div></div>
+            <div id="member-grid" class="member-grid">
+                <div class="loading">載入中...</div>
+            </div>
         </main>
 
         <main id="page-instruments" class="page-section hidden">
             <div class="toolbar">
                 <div class="filters">
                     <input type="text" id="search-inst" placeholder="搜尋儀器名稱、廠商..." oninput="app.renderInstruments()">
-                    <select id="filter-location" onchange="app.renderInstruments()"><option value="">全部區域</option></select>
+                    <select id="filter-location" onchange="app.renderInstruments()">
+                        <option value="">全部區域</option>
+                    </select>
                 </div>
                 <div class="actions">
                     <button onclick="app.openInstModal()" class="btn btn-primary">➕ 新增儀器</button>
                     <button onclick="app.fetchData()" class="btn btn-secondary">🔄 重新整理</button>
                 </div>
             </div>
+
             <div class="table-container">
                 <table id="inst-table">
                     <thead>
@@ -56,7 +62,7 @@
             </div>
         </main>
 
-        <main id="page-logs" class="page-section active">
+        <main id="page-logs" class="page-section hidden">
             <div class="toolbar">
                 <div class="filters">
                     <input type="text" id="search-log" placeholder="搜尋問題、儀器..." oninput="app.renderLogs()">
@@ -80,41 +86,236 @@
                             <th width="60">緊急</th>
                             <th width="100">日期</th>
                             <th width="150">儀器</th>
-                            
                             <th>問題描述</th>
                             <th>解決方案</th>
                             <th width="100">負責人</th>
                             <th width="80">操作</th>
                         </tr>
                     </thead>
-                    <tbody id="log-tbody">
-                        </tbody>
+                    <tbody id="log-tbody"></tbody>
+                </table>
+            </div>
+        </main>
+
+        <main id="page-accounting" class="page-section active">
+            
+            <div class="dashboard-grid">
+                <div class="dash-card">
+                    <h4>公積金餘額 (Balance)</h4>
+                    <div class="dash-value" id="val-balance">---</div>
+                    <small>實際戶頭金額</small>
+                </div>
+                <div class="dash-card danger">
+                    <h4>待還代墊 (Payable)</h4>
+                    <div class="dash-value" id="val-payable">---</div>
+                    <small onclick="app.showDebtsDetail()" style="text-decoration:underline; cursor:pointer;">查看欠誰錢</small>
+                </div>
+                <div class="dash-card warning">
+                    <h4>等待回沖 (Receivable)</h4>
+                    <div class="dash-value" id="val-receivable">---</div>
+                    <small>學校流程中</small>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <div class="filters">
+                    <input type="text" id="search-acc" placeholder="搜尋項目..." oninput="app.renderAccounting()">
+                    <div class="status-filter-group">
+                        <button class="filter-chip active" onclick="app.setAccFilter('All')" data-acc-val="All">全部</button>
+                        <button class="filter-chip" onclick="app.setAccFilter('Debt')" data-acc-val="Debt">🔴 欠款中</button>
+                        <button class="filter-chip" onclick="app.setAccFilter('Wait')" data-acc-val="Wait">🟡 等回沖</button>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button onclick="app.openAccModal()" class="btn btn-primary">💸 新增帳務</button>
+                    <button onclick="app.fetchData()" class="btn btn-secondary">🔄</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table id="acc-table">
+                    <thead>
+                        <tr>
+                            <th width="40">狀態</th>
+                            <th width="90">日期</th>
+                            <th>項目說明</th>
+                            <th width="80" style="text-align:right">金額</th>
+                            <th width="80">代墊人</th>
+                            <th width="90">學校回沖</th>
+                            <th width="90">還款學生</th>
+                            <th width="40">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="acc-tbody"></tbody>
                 </table>
             </div>
         </main>
     </div>
 
     <div id="member-modal" class="modal hidden">
-        <div class="modal-content"><div class="modal-header"><h3 id="m-modal-title">編輯成員</h3><button onclick="app.closeModal('member-modal')" class="close-btn">&times;</button></div><div class="modal-body"><div class="form-group"><label>學號 (Student_ID)</label><input type="text" id="Student_ID"></div><div class="form-row"><div class="form-group"><label>學位</label><select id="Degree"><option value="PhD">PhD (博班)</option><option value="Master">Master (碩班)</option><option value="Undergrad">Undergrad (專題生)</option><option value="Prof">Professor</option></select></div><div class="form-group"><label>中文名</label><input type="text" id="Name_Ch"></div></div><div class="form-row"><div class="form-group"><label>英文名</label><input type="text" id="Name_En"></div><div class="form-group"><label>英文姓</label><input type="text" id="Surname_En"></div></div><div class="form-row"><div class="form-group"><label>系所</label><input type="text" id="Department" list="dept-list"></div><div class="form-group"><label>狀態</label><select id="Status"><option value="Active">Active (在學)</option><option value="Alumni">Alumni (畢業)</option></select></div></div><div class="form-row"><div class="form-group"><label>入學日</label><input type="date" id="Enrollment_Date"></div><div class="form-group"><label>離校日</label><input type="date" id="Leave_Date"></div></div><div class="form-row"><div class="form-group"><label>電話</label><input type="text" id="Phone"></div><div class="form-group"><label>Email</label><input type="text" id="Email"></div></div><div class="form-group"><label>權限</label><select id="Role"><option value="User">User</option><option value="Admin">Admin</option></select></div></div><div class="modal-footer"><button onclick="app.saveMember()" class="btn btn-primary" id="btn-save-m">儲存</button></div></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="m-modal-title">編輯成員</h3>
+                <button onclick="app.closeModal('member-modal')" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>學號 (Student_ID)</label><input type="text" id="Student_ID"></div>
+                <div class="form-row">
+                    <div class="form-group"><label>學位</label><select id="Degree"><option value="PhD">PhD (博班)</option><option value="Master">Master (碩班)</option><option value="Undergrad">Undergrad (專題生)</option><option value="Prof">Professor</option></select></div>
+                    <div class="form-group"><label>中文名</label><input type="text" id="Name_Ch"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>英文名</label><input type="text" id="Name_En"></div>
+                    <div class="form-group"><label>英文姓</label><input type="text" id="Surname_En"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>系所</label><input type="text" id="Department" list="dept-list"></div>
+                    <div class="form-group"><label>狀態</label><select id="Status"><option value="Active">Active (在學)</option><option value="Alumni">Alumni (畢業)</option></select></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>入學日</label><input type="date" id="Enrollment_Date"></div>
+                    <div class="form-group"><label>離校日</label><input type="date" id="Leave_Date"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>電話</label><input type="text" id="Phone"></div>
+                    <div class="form-group"><label>Email</label><input type="text" id="Email"></div>
+                </div>
+                <div class="form-group"><label>權限</label><select id="Role"><option value="User">User</option><option value="Admin">Admin</option></select></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.saveMember()" class="btn btn-primary" id="btn-save-m">儲存</button>
+            </div>
+        </div>
     </div>
-    
+
     <div id="inst-modal" class="modal hidden">
-        <div class="modal-content"><div class="modal-header"><h3 id="i-modal-title">編輯儀器</h3><button onclick="app.closeModal('inst-modal')" class="close-btn">&times;</button></div><div class="modal-body"><div class="form-row"><div class="form-group"><label>儀器 ID (Instrument_ID)</label><input type="text" id="Instrument_ID" placeholder="INST_01"></div><div class="form-group"><label>財產編號 (Property_ID)</label><input type="text" id="Property_ID"></div></div><div class="form-group"><label>儀器名稱 (Name)</label><input type="text" id="Name"></div><div class="form-row"><div class="form-group"><label>區域 (Location)</label><select id="Location"><option value="">請選擇區域</option></select></div><div class="form-group"><label>現況狀態 (Is_Active)</label><select id="Is_Active"><option value="TRUE">🟢 正常運作 (Active)</option><option value="FALSE">🔴 停用/報廢 (Inactive)</option></select></div></div><div class="form-group"><label>負責人 (Manager)</label><select id="Manager_ID"><option value="">(無)</option></select></div><div class="form-group"><label>廠商資訊 (Vendor_Info)</label><input type="text" id="Vendor_Info" placeholder="廠商名、聯絡電話..."></div><div class="form-group"><label>手冊連結 (Manual_Link)</label><input type="text" id="Manual_Link" placeholder="Google Drive Link..."></div></div><div class="modal-footer"><button onclick="app.saveInstrument()" class="btn btn-primary" id="btn-save-i">儲存</button></div></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="i-modal-title">編輯儀器</h3>
+                <button onclick="app.closeModal('inst-modal')" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group"><label>儀器 ID (Instrument_ID)</label><input type="text" id="Instrument_ID" placeholder="INST_01"></div>
+                    <div class="form-group"><label>財產編號 (Property_ID)</label><input type="text" id="Property_ID"></div>
+                </div>
+                <div class="form-group"><label>儀器名稱 (Name)</label><input type="text" id="Name"></div>
+                <div class="form-row">
+                    <div class="form-group"><label>區域 (Location)</label><select id="Location"><option value="">請選擇區域</option></select></div>
+                    <div class="form-group"><label>現況狀態 (Is_Active)</label><select id="Is_Active"><option value="TRUE">🟢 正常運作 (Active)</option><option value="FALSE">🔴 停用/報廢 (Inactive)</option></select></div>
+                </div>
+                <div class="form-group"><label>負責人 (Manager)</label><select id="Manager_ID"><option value="">(無)</option></select></div>
+                <div class="form-group"><label>廠商資訊 (Vendor_Info)</label><input type="text" id="Vendor_Info" placeholder="廠商名、聯絡電話..."></div>
+                <div class="form-group"><label>手冊連結 (Manual_Link)</label><input type="text" id="Manual_Link" placeholder="Google Drive Link..."></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.saveInstrument()" class="btn btn-primary" id="btn-save-i">儲存</button>
+            </div>
+        </div>
     </div>
 
     <div id="log-modal" class="modal hidden">
         <div class="modal-content">
-            <div class="modal-header"><h3 id="l-modal-title">回報問題</h3><button onclick="app.closeModal('log-modal')" class="close-btn">&times;</button></div>
+            <div class="modal-header">
+                <h3 id="l-modal-title">回報問題</h3>
+                <button onclick="app.closeModal('log-modal')" class="close-btn">&times;</button>
+            </div>
             <div class="modal-body">
                 <input type="hidden" id="Log_ID">
-                <div class="form-row"><div class="form-group"><label>狀態 (Status)</label><select id="Log_Status"><option value="Open">🔴 未解決 (Open)</option><option value="Closed">🟢 已解決 (Closed)</option></select></div><div class="form-group"><label>緊急程度 (Urgency)</label><select id="Urgency"><option value="5">🔥🔥🔥🔥🔥 (5) 嚴重</option><option value="4">🔥🔥🔥🔥 (4) 高</option><option value="3" selected>🔥🔥🔥 (3) 中</option><option value="2">🔥🔥 (2) 低</option><option value="1">🔥 (1) 輕微</option></select></div></div>
-                <div class="form-row"><div class="form-group"><label>發生日期 (Reported)</label><input type="date" id="Date_Reported"></div><div class="form-group"><label>解決日期 (Resolved)</label><input type="date" id="Date_Resolved"></div></div>
-                <div class="form-row"><div class="form-group"><label>地點 (Location) *篩選用</label><select id="Log_Location_Filter" onchange="app.filterLogInstruments()"><option value="">請選擇...</option></select></div><div class="form-group"><label>儀器 (Instrument)</label><select id="Log_Instrument_ID"><option value="">請先選擇地點</option></select></div></div>
+                <div class="form-row">
+                    <div class="form-group"><label>狀態 (Status)</label><select id="Log_Status"><option value="Open">🔴 未解決 (Open)</option><option value="Closed">🟢 已解決 (Closed)</option></select></div>
+                    <div class="form-group"><label>緊急程度 (Urgency)</label><select id="Urgency"><option value="5">🔥🔥🔥🔥🔥 (5) 嚴重</option><option value="4">🔥🔥🔥🔥 (4) 高</option><option value="3" selected>🔥🔥🔥 (3) 中</option><option value="2">🔥🔥 (2) 低</option><option value="1">🔥 (1) 輕微</option></select></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>發生日期 (Reported)</label><input type="date" id="Date_Reported"></div>
+                    <div class="form-group"><label>解決日期 (Resolved)</label><input type="date" id="Date_Resolved"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>地點 (Location) *篩選用</label><select id="Log_Location_Filter" onchange="app.filterLogInstruments()"><option value="">請選擇...</option></select></div>
+                    <div class="form-group"><label>儀器 (Instrument)</label><select id="Log_Instrument_ID"><option value="">請先選擇地點</option></select></div>
+                </div>
                 <div class="form-group"><label>問題描述 (Problem)</label><textarea id="Problem_Desc" rows="3" placeholder="請詳細描述狀況..."></textarea></div>
                 <div class="form-group"><label>解決方案 (Solution)</label><textarea id="Solution" rows="2" placeholder="維修過程、更換零件... (未解決可留空)"></textarea></div>
                 <div class="form-group"><label>負責人 (Manager)</label><select id="Owner_ID"><option value="">(選擇成員)</option></select></div>
             </div>
-            <div class="modal-footer"><button onclick="app.saveLog()" class="btn btn-primary" id="btn-save-l">儲存紀錄</button></div>
+            <div class="modal-footer">
+                <button onclick="app.saveLog()" class="btn btn-primary" id="btn-save-l">儲存紀錄</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="acc-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="a-modal-title">記帳</h3>
+                <button onclick="app.closeModal('acc-modal')" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="Txn_ID">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>類型 (Type)</label>
+                        <select id="Acc_Type" onchange="app.handleAccTypeChange()">
+                            <option value="School">🏫 學校報帳 (會回沖)</option>
+                            <option value="Lab">🧪 實驗室內帳 (不回沖)</option>
+                            <option value="Deposit">💰 匯入公積金 (老師)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>日期 (Date)</label>
+                        <input type="date" id="Acc_Date">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>項目說明 (Description)</label>
+                    <input type="text" id="Acc_Description" placeholder="ex: 購買光學桌螺絲">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>金額 (Amount)</label>
+                        <input type="number" id="Acc_Amount" placeholder="請輸入金額 (ex: 500)">
+                    </div>
+                    <div class="form-group">
+                        <label>先付錢的人 (Payer)</label>
+                        <select id="Acc_Payer" onchange="app.handleAccPayerChange()">
+                            </select>
+                    </div>
+                </div>
+
+                <hr style="border:0; border-top:1px dashed #ccc; margin:10px 0;">
+
+                <div class="form-row">
+                    <div class="form-group" id="grp-recharge">
+                        <label>學校回沖日期</label>
+                        <input type="date" id="Recharge_Date">
+                        <small style="color:#888">空白=等待回沖</small>
+                    </div>
+                    <div class="form-group" id="grp-payback">
+                        <label>還款給代墊人日期</label>
+                        <input type="date" id="Payback_Date">
+                        <small style="color:#888">空白=欠款中</small>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>發票/收據連結 (選填)</label>
+                    <input type="text" id="Invoice_Link">
+                </div>
+
+                <div class="form-group">
+                    <label>備註 (Remark)</label>
+                    <textarea id="Acc_Remark" rows="2" placeholder="例如：口試委員點心費..."></textarea>
+                </div>
+
+            </div> <div class="modal-footer">
+
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.saveAccounting()" class="btn btn-primary" id="btn-save-a">儲存帳務</button>
+            </div>
         </div>
     </div>
 

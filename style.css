@@ -165,6 +165,21 @@ textarea { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 
 #log-table td:nth-child(2) { /* 維修紀錄 - 第2欄 (緊急) */
     text-align: center;
 }
+
+/* Dashboard Cards */
+.dashboard-grid { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+.dash-card { flex: 1; background: white; padding: 15px; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 2px 5px rgba(0,0,0,0.05); min-width: 200px; text-align: center; }
+.dash-card h4 { margin: 0 0 10px 0; color: #666; font-size: 0.9rem; }
+.dash-value { font-size: 1.8rem; font-weight: bold; color: #212529; margin-bottom: 5px; }
+.dash-card.danger .dash-value { color: #dc3545; }
+.dash-card.warning .dash-value { color: #fd7e14; }
+.dash-card small { color: #999; font-size: 0.8rem; }
+
+/* Accounting Table Specifics */
+#acc-table td:nth-child(4) { font-family: 'Consolas', monospace; font-weight: bold; } /* 金額 */
+.amount-pos { color: #198754; }
+.amount-neg { color: #dc3545; }
+.date-empty { color: #ced4da; font-style: italic; font-size: 0.85rem; } /* 空白日期顯示 "Pending" */
 /* ... (保留原本 @media 之前的 CSS) ... */
 
 @media (max-width: 768px) {
@@ -233,6 +248,22 @@ textarea { width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 
     /* 狀態顯示切換 */
     .desktop-status { display: none; }
     .mobile-status { display: inline; font-size: 1.2rem; }
+
+    /* 儀表板變垂直 */
+    .dashboard-grid { flex-direction: column; }
+    
+    /* 帳務表格隱藏次要欄位 */
+    /* 顯示: 狀態(1), 項目(3), 金額(4), 操作(8) */
+    /* 隱藏: 日期(2), 代墊人(5), 回沖日(6), 還款日(7) */
+    #acc-table th:nth-child(2), #acc-table td:nth-child(2),
+    #acc-table th:nth-child(5), #acc-table td:nth-child(5),
+    #acc-table th:nth-child(6), #acc-table td:nth-child(6),
+    #acc-table th:nth-child(7), #acc-table td:nth-child(7) { display: none; }
+    
+    /* 強制設定寬度 */
+    #acc-table th:nth-child(1) { width: 30px; text-align: center; } /* 狀態燈 */
+    #acc-table th:nth-child(4) { width: 80px; text-align: right; } /* 金額 */
+    #acc-table th:last-child { width: 40px !important; text-align: center; padding: 0 !important; } /* 編輯 */
 }
 
 /* --- 人員卡片標頭優化 --- */

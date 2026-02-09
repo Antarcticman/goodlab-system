@@ -4,10 +4,12 @@ const app = {
     data: {
         members: [],
         instruments: [],
-        logs: []
+        logs: [],
+        accounting: []
     },
     sortState: { key: 'Location', direction: 'asc' },
     logFilterStatus: 'Open',
+    accFilterStatus: 'All',
 
     init: function() {
         this.fetchData();
@@ -15,27 +17,34 @@ const app = {
         this.setupAutoStatus(); 
         this.setupLogAutoStatus();
         this.updateFilterUI();
+        this.updateAccFilterUI();
     },
 
     fillMemberSelect: function(selectId) {
         const select = document.getElementById(selectId);
         if (!select) return;
-        const options = this.data.members
-            .filter(m => m.Status === 'Active')
-            .map(m => `<option value="${m.Student_ID}">${m.Name_Ch}</option>`)
-            .join('');
+        const options = this.data.members.filter(m => m.Status === 'Active').map(m => `<option value="${m.Student_ID}">${m.Name_Ch}</option>`).join('');
         select.innerHTML = '<option value="">(請選擇)</option>' + options;
     },
 
+    fillPayerSelect: function(selectId) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        const members = this.data.members.filter(m => m.Status === 'Active').map(m => `<option value="${m.Student_ID}">${m.Name_Ch}</option>`).join('');
+        // 公積金排第一個
+        select.innerHTML = `<option value="Fund">🏦 公積金戶頭 (Fund)</option>` + members;
+    },
+
     fetchData: async function() {
-        const mGrid = document.getElementById('member-grid');
-        if(mGrid) mGrid.innerHTML = '<div class="loading">資料讀取中...</div>';
-
-        const iBody = document.getElementById('inst-tbody');
-        if(iBody) iBody.innerHTML = '<tr><td colspan="6" class="loading">資料讀取中...</td></tr>';
-
-        const lBody = document.getElementById('log-tbody');
-        if(lBody) lBody.innerHTML = '<tr><td colspan="8" class="loading">資料讀取中...</td></tr>';
+        // 設定 Loading
+        ['member-grid', 'inst-tbody', 'log-tbody', 'acc-tbody'].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) {
+                // 根據表格欄位數調整 colspan
+                const cols = id === 'inst-tbody' ? 6 : id === 'log-tbody' ? 8 : id === 'acc-tbody' ? 8 : 1;
+                el.innerHTML = id === 'member-grid' ? '<div class="loading">讀取中...</div>' : `<tr><td colspan="${cols}" class="loading">資料讀取中...</td></tr>`;
+            }
+        });
 
         try {
             const res = await fetch(`${GAS_URL}?action=getAllData`);
@@ -45,10 +54,13 @@ const app = {
             this.data.members = json.members || [];
             this.data.instruments = json.instruments || [];
             this.data.logs = json.logs || [];
+            this.data.accounting = json.accounting || []; // 新增
 
             this.renderMembers();
             this.renderInstruments();
             this.renderLogs();
+            this.renderAccounting(); // 新增
+            this.calcDashboard(); // 新增：計算金額
 
         } catch (e) {
             console.error(e);
@@ -62,16 +74,280 @@ const app = {
         document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
 
         const target = document.getElementById(`page-${tabName}`);
-        if(target) {
-            target.classList.remove('hidden');
-            target.classList.add('active');
-        }
+        if(target) { target.classList.remove('hidden'); target.classList.add('active'); }
         
-        const map = { 'members': 0, 'instruments': 1, 'logs': 2 };
+        // 對應按鈕 Index: members=0, instruments=1, logs=2, accounting=3
+        const map = { 'members': 0, 'instruments': 1, 'logs': 2, 'accounting': 3 };
         const btns = document.querySelectorAll('.nav-btn');
         if(btns[map[tabName]]) btns[map[tabName]].classList.add('active');
     },
 
+    // ================= 💰 公積金管理邏輯 (全新) =================
+
+    setAccFilter: function(status) {
+        this.accFilterStatus = status;
+        this.updateAccFilterUI();
+        this.renderAccounting();
+    },
+
+    updateAccFilterUI: function() {
+        document.querySelectorAll('.filter-chip[data-acc-val]').forEach(btn => {
+            if (btn.dataset.accVal === this.accFilterStatus) btn.classList.add('active');
+            else btn.classList.remove('active');
+        });
+    },
+
+    // 計算儀表板數字
+    calcDashboard: function() {
+        let balance = 0;
+        let payable = 0;
+        let receivable = 0;
+
+        this.data.accounting.forEach(acc => {
+            const amt = parseFloat(acc.Amount) || 0;
+            const isFund = acc.Payer === 'Fund';
+            const isRecharged = !!acc.Recharge_Date; // 有日期=True
+            const isPaidBack = !!acc.Payback_Date;   // 有日期=True
+
+            // 1. 計算餘額 (Balance)
+            // 邏輯：存入 + 學校已回沖的錢 - 公積金直接付出去的 - 公積金還給學生的
+            if (acc.Type === 'Deposit') {
+                balance += amt;
+            } else if (acc.Type === 'School') {
+                if (isRecharged) balance += Math.abs(amt); // 學校還錢進來了 (+)
+                if (isFund) balance -= Math.abs(amt);      // 公積金先付的 (-)
+                if (!isFund && isPaidBack) balance -= Math.abs(amt); // 還給學生 (-)
+            } else if (acc.Type === 'Lab') {
+                if (isFund) balance -= Math.abs(amt);      // 內帳公積金付 (-)
+                if (!isFund && isPaidBack) balance -= Math.abs(amt); // 內帳還學生 (-)
+            }
+
+            // 2. 計算待還代墊 (Payable) -> Payer是學生 且 還沒Payback
+            if (!isFund && !isPaidBack) {
+                payable += Math.abs(amt);
+            }
+
+            // 3. 計算等待回沖 (Receivable) -> Type是School 且 還沒Recharge
+            if (acc.Type === 'School' && !isRecharged) {
+                receivable += Math.abs(amt);
+            }
+        });
+
+        // 更新 UI
+        document.getElementById('val-balance').innerText = "$" + balance.toLocaleString();
+        document.getElementById('val-payable').innerText = "$" + payable.toLocaleString();
+        document.getElementById('val-receivable').innerText = "$" + receivable.toLocaleString();
+    },
+
+    // 顯示欠款明細 (Alert 簡易版)
+    showDebtsDetail: function() {
+        const debts = {};
+        this.data.accounting.forEach(acc => {
+            if (acc.Payer !== 'Fund' && !acc.Payback_Date) {
+                const name = this.getMemberName(acc.Payer);
+                debts[name] = (debts[name] || 0) + Math.abs(acc.Amount);
+            }
+        });
+        
+        if (Object.keys(debts).length === 0) {
+            alert("目前沒有欠任何人錢！🎉");
+            return;
+        }
+
+        let msg = "待還款明細：\n----------------\n";
+        for (let [name, amt] of Object.entries(debts)) {
+            msg += `${name}: $${amt}\n`;
+        }
+        alert(msg);
+    },
+
+    renderAccounting: function() {
+        const tbody = document.getElementById('acc-tbody');
+        const term = document.getElementById('search-acc').value.toLowerCase();
+        const filter = this.accFilterStatus;
+
+        let filtered = this.data.accounting.filter(acc => {
+            // 搜尋文字
+            const payerName = this.getMemberName(acc.Payer);
+            const text = (acc.Description + payerName + acc.Type).toLowerCase();
+            if (!text.includes(term)) return false;
+
+            // 狀態篩選
+            const isDebt = (acc.Payer !== 'Fund' && !acc.Payback_Date); // 欠人錢
+            const isWait = (acc.Type === 'School' && !acc.Recharge_Date); // 等回沖
+
+            if (filter === 'Debt') return isDebt;
+            if (filter === 'Wait') return isWait;
+            return true;
+        });
+
+        // 排序：日期新到舊
+        filtered.sort((a, b) => new Date(b.Date) - new Date(a.Date));
+
+        if (filtered.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty">查無紀錄</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = filtered.map(acc => {
+            const payerName = this.getMemberName(acc.Payer);
+            const amt = parseFloat(acc.Amount);
+            const isFund = acc.Payer === 'Fund';
+            
+            // 狀態燈號邏輯
+            let statusIcon = "🟢"; // 預設正常
+            if (!isFund && !acc.Payback_Date) statusIcon = "🔴"; // 欠學生錢 = 紅燈 (最緊急)
+            else if (acc.Type === 'School' && !acc.Recharge_Date) statusIcon = "🟡"; // 錢還在學校 = 黃燈 (次要)
+            
+            // 日期顯示 (有日期顯示日期，沒日期顯示狀態文字)
+            const dateRecharge = acc.Recharge_Date ? this.formatDateForInput(acc.Recharge_Date) : `<span class="date-empty">等待回沖</span>`;
+            const datePayback = isFund ? `<span class="date-empty">-</span>` : (acc.Payback_Date ? this.formatDateForInput(acc.Payback_Date) : `<span class="date-empty" style="color:#dc3545">尚未還款</span>`);
+            
+            // 特別處理內帳/Deposit的顯示
+            const showRecharge = (acc.Type === 'Lab' || acc.Type === 'Deposit') ? '<span class="date-empty">-</span>' : dateRecharge;
+
+            return `
+            <tr onclick="app.openAccModal('${acc.Txn_ID}')" style="cursor:pointer">
+                <td style="text-align:center; font-size:1.2rem;">${statusIcon}</td>
+                <td>${this.formatDateForInput(acc.Date)}</td>
+                <td>
+                    ${acc.Description} 
+                    <br><small style="color:#888">${this.getAccTypeName(acc.Type)}</small>
+                </td>
+                <td style="text-align:right" class="${amt >= 0 ? 'amount-pos' : 'amount-neg'}">${amt}</td>
+                <td>${payerName}</td>
+                <td>${showRecharge}</td>
+                <td>${datePayback}</td>
+                <td style="text-align:center;">
+                    <button onclick="event.stopPropagation(); app.openAccModal('${acc.Txn_ID}')" class="btn btn-sm btn-secondary">✏️</button>
+                </td>
+            </tr>`;
+        }).join('');
+    },
+
+    // 輔助：取得中文類型
+    getAccTypeName: function(type) {
+        if(type === 'School') return '🏫 報帳';
+        if(type === 'Lab') return '🧪 內帳';
+        if(type === 'Deposit') return '💰 匯入';
+        return type;
+    },
+
+    // 輔助：取得成員名字 (或是 Fund)
+    getMemberName: function(id) {
+        if (id === 'Fund') return '🏦 公積金';
+        const m = this.data.members.find(x => x.Student_ID === id);
+        return m ? m.Name_Ch : id;
+    },
+
+    openAccModal: function(id = null) {
+        const modal = document.getElementById('acc-modal');
+        const inputs = document.querySelectorAll('#acc-modal input, #acc-modal select, #acc-modal textarea');
+        
+        this.fillPayerSelect('Acc_Payer');
+        inputs.forEach(el => el.value = ''); // 清空所有欄位 (包含新的 textarea)
+
+        if (id) {
+            document.getElementById('a-modal-title').innerText = "編輯帳務";
+            const acc = this.data.accounting.find(x => x.Txn_ID === id);
+            
+            // 回填資料
+            document.getElementById('Txn_ID').value = acc.Txn_ID;
+            document.getElementById('Acc_Type').value = acc.Type;
+            document.getElementById('Acc_Date').value = this.formatDateForInput(acc.Date);
+            document.getElementById('Acc_Description').value = acc.Description;
+            document.getElementById('Acc_Amount').value = acc.Amount;
+            document.getElementById('Acc_Payer').value = acc.Payer;
+            document.getElementById('Recharge_Date').value = this.formatDateForInput(acc.Recharge_Date);
+            document.getElementById('Payback_Date').value = this.formatDateForInput(acc.Payback_Date);
+            document.getElementById('Invoice_Link').value = acc.Invoice_Link || '';
+            
+            // ★ 新增：回填備註
+            document.getElementById('Acc_Remark').value = acc.Remark || '';
+
+        } else {
+            document.getElementById('a-modal-title').innerText = "新增帳務";
+            const now = new Date();
+            const timeCode = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
+            document.getElementById('Txn_ID').value = `ACC_${timeCode}`;
+            document.getElementById('Acc_Date').value = this.formatDateForInput(new Date());
+            document.getElementById('Acc_Type').value = 'School';
+            document.getElementById('Acc_Payer').value = 'Fund';
+        }
+        
+        this.handleAccTypeChange();
+        this.handleAccPayerChange();
+
+        modal.classList.remove('hidden');
+    },
+
+    // UI 連動：類型改變時，隱藏/顯示回沖日期
+    handleAccTypeChange: function() {
+        const type = document.getElementById('Acc_Type').value;
+        const divRecharge = document.getElementById('grp-recharge');
+        // 只有 School 需要回沖日期
+        divRecharge.style.visibility = (type === 'School') ? 'visible' : 'hidden';
+    },
+
+    // UI 連動：付款人改變時，隱藏/顯示還款日期
+    handleAccPayerChange: function() {
+        const payer = document.getElementById('Acc_Payer').value;
+        const divPayback = document.getElementById('grp-payback');
+        // 如果是 Fund 付的，就不需要還款日期
+        divPayback.style.visibility = (payer === 'Fund') ? 'hidden' : 'visible';
+    },
+
+    saveAccounting: async function() {
+        let rawAmount = parseFloat(document.getElementById('Acc_Amount').value);
+        const type = document.getElementById('Acc_Type').value;
+
+        if (isNaN(rawAmount)) rawAmount = 0;
+
+        // 自動正負號邏輯
+        if (type === 'School' || type === 'Lab') {
+            rawAmount = -Math.abs(rawAmount); 
+        } else {
+            rawAmount = Math.abs(rawAmount);  
+        }
+
+        const payload = {
+            Txn_ID: document.getElementById('Txn_ID').value,
+            Type: type,
+            Date: document.getElementById('Acc_Date').value,
+            Description: document.getElementById('Acc_Description').value,
+            Amount: rawAmount,
+            Payer: document.getElementById('Acc_Payer').value,
+            Recharge_Date: document.getElementById('Recharge_Date').value,
+            Payback_Date: document.getElementById('Payback_Date').value,
+            Invoice_Link: document.getElementById('Invoice_Link').value,
+            
+            // ★ 新增：傳送備註資料 (Key 必須跟 Google Sheet 的標題一樣)
+            Remark: document.getElementById('Acc_Remark').value
+        };
+
+        if (!payload.Description || !payload.Amount) { alert("請填寫項目和金額"); return; }
+
+        if(!confirm("確定儲存帳務？")) return;
+        const btn = document.getElementById('btn-save-a');
+        btn.innerText = "儲存中...";
+        btn.disabled = true;
+
+        try {
+            await fetch(GAS_URL, {
+                method: 'POST',
+                body: JSON.stringify({ type: "saveAccounting", data: payload })
+            });
+            alert("儲存成功！");
+            this.closeModal('acc-modal');
+            this.fetchData();
+        } catch (e) {
+            alert("錯誤: " + e.message);
+        } finally {
+            btn.innerText = "儲存";
+            btn.disabled = false;
+        }
+    },
+    
     // ================= 儀器管理邏輯 (修改處) =================
 
     sortInstruments: function(key) {
@@ -599,16 +875,13 @@ const app = {
     },
 
     setupModalEvents: function() {
-        ['member-modal', 'inst-modal', 'log-modal'].forEach(id => {
+        ['member-modal', 'inst-modal', 'log-modal', 'acc-modal'].forEach(id => {
             const modal = document.getElementById(id);
-            if(!modal) return;
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) this.closeModal(id);
-            });
+            if(modal) modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(id); });
         });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
-                ['member-modal', 'inst-modal', 'log-modal'].forEach(id => {
+                ['member-modal', 'inst-modal', 'log-modal', 'acc-modal'].forEach(id => {
                     const el = document.getElementById(id);
                     if(el && !el.classList.contains('hidden')) this.closeModal(id);
                 });
