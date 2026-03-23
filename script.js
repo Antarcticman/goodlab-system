@@ -1,5 +1,22 @@
-const GAS_URL = "https://script.google.com/macros/s/AKfycbzBKHQn213TIdw-EDMt7FUuvZFPkHn_YWv_s6LvFziGuxFJP2_6hOlc6JBXuomwg1LJ-g/exec"; 
+// === script.js 最上方 ===
+// 1. 引入 Firebase 模組
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+// 2. 填入你的專屬金鑰
+const firebaseConfig = {
+  apiKey: "AIzaSyBdgqZaW2jdJHTbKplPur2R6JxDyjb02PU",
+  authDomain: "goodlab-system.firebaseapp.com",
+  projectId: "goodlab-system",
+  storageBucket: "goodlab-system.firebasestorage.app",
+  messagingSenderId: "21810534435",
+  appId: "1:21810534435:web:b1feeb465d4371c7f57996"
+};
 
+// 3. 初始化資料庫
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
+// 4. 原本的 app 結構
 const app = {
     data: {
         members: [],
@@ -12,12 +29,23 @@ const app = {
     accFilterStatus: 'All',
 
     init: function() {
-        this.fetchData();
+        this.setupRealtimeListeners(); // ★ 改成呼叫這個新的監聽器
         this.setupModalEvents();
         this.setupAutoStatus(); 
         this.setupLogAutoStatus();
         this.updateFilterUI();
         this.updateAccFilterUI();
+    },
+
+    // ================= 共用刪除邏輯 =================
+    deleteRecord: async function(collectionName, id, modalId) {
+        if(!confirm("⚠️ 確定要永久刪除這筆資料嗎？刪除後無法復原！")) return;
+        try {
+            await deleteDoc(doc(db, collectionName, id));
+            this.closeModal(modalId);
+        } catch (e) {
+            alert("刪除失敗: " + e.message);
+        }
     },
 
     fillMemberSelect: function(selectId) {
@@ -35,37 +63,41 @@ const app = {
         select.innerHTML = `<option value="Fund">🏦 公積金戶頭 (Fund)</option>` + members;
     },
 
-    fetchData: async function() {
-        // 設定 Loading
+    // ================= Firebase 即時連線 =================
+    setupRealtimeListeners: function() {
+        // 設定 Loading 畫面
         ['member-grid', 'inst-tbody', 'log-tbody', 'acc-tbody'].forEach(id => {
             const el = document.getElementById(id);
             if(el) {
-                // 根據表格欄位數調整 colspan
                 const cols = id === 'inst-tbody' ? 6 : id === 'log-tbody' ? 8 : id === 'acc-tbody' ? 8 : 1;
-                el.innerHTML = id === 'member-grid' ? '<div class="loading">讀取中...</div>' : `<tr><td colspan="${cols}" class="loading">資料讀取中...</td></tr>`;
+                el.innerHTML = id === 'member-grid' ? '<div class="loading">與 Firebase 連線中...</div>' : `<tr><td colspan="${cols}" class="loading">與 Firebase 連線中...</td></tr>`;
             }
         });
 
-        try {
-            const res = await fetch(`${GAS_URL}?action=getAllData`);
-            const json = await res.json();
-            if (json.error) throw new Error(json.error);
-            
-            this.data.members = json.members || [];
-            this.data.instruments = json.instruments || [];
-            this.data.logs = json.logs || [];
-            this.data.accounting = json.accounting || []; // 新增
+        // 1. 即時監聽公積金 (Accounting)
+        onSnapshot(collection(db, "accounting"), (snapshot) => {
+            this.data.accounting = snapshot.docs.map(doc => doc.data());
+            this.renderAccounting();
+            this.calcDashboard();
+        });
 
+        // 2. 即時監聽人員 (Members)
+        onSnapshot(collection(db, "members"), (snapshot) => {
+            this.data.members = snapshot.docs.map(doc => doc.data());
             this.renderMembers();
-            this.renderInstruments();
-            this.renderLogs();
-            this.renderAccounting(); // 新增
-            this.calcDashboard(); // 新增：計算金額
+        });
 
-        } catch (e) {
-            console.error(e);
-            alert("讀取失敗：" + e.message);
-        }
+        // 3. 即時監聽儀器 (Instruments)
+        onSnapshot(collection(db, "instruments"), (snapshot) => {
+            this.data.instruments = snapshot.docs.map(doc => doc.data());
+            this.renderInstruments();
+        });
+
+        // 4. 即時監聽維修紀錄 (Logs)
+        onSnapshot(collection(db, "logs"), (snapshot) => {
+            this.data.logs = snapshot.docs.map(doc => doc.data());
+            this.renderLogs();
+        });
     },
 
     switchTab: function(tabName) {
@@ -242,6 +274,7 @@ const app = {
 
     openAccModal: function(id = null) {
         const modal = document.getElementById('acc-modal');
+        const btnDel = document.getElementById('btn-del-a');
         const inputs = document.querySelectorAll('#acc-modal input, #acc-modal select, #acc-modal textarea');
         
         this.fillPayerSelect('Acc_Payer');
@@ -249,6 +282,7 @@ const app = {
 
         if (id) {
             document.getElementById('a-modal-title').innerText = "編輯帳務";
+            btnDel.classList.remove('hidden');
             const acc = this.data.accounting.find(x => x.Txn_ID === id);
             
             // 回填資料
@@ -267,6 +301,7 @@ const app = {
 
         } else {
             document.getElementById('a-modal-title').innerText = "新增帳務";
+            btnDel.classList.add('hidden');
             const now = new Date();
             const timeCode = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
             document.getElementById('Txn_ID').value = `ACC_${timeCode}`;
@@ -327,19 +362,16 @@ const app = {
 
         if (!payload.Description || !payload.Amount) { alert("請填寫項目和金額"); return; }
 
-        if(!confirm("確定儲存帳務？")) return;
         const btn = document.getElementById('btn-save-a');
         btn.innerText = "儲存中...";
         btn.disabled = true;
 
         try {
-            await fetch(GAS_URL, {
-                method: 'POST',
-                body: JSON.stringify({ type: "saveAccounting", data: payload })
-            });
-            alert("儲存成功！");
+            // ★ Firebase 寫入語法
+            await setDoc(doc(db, "accounting", payload.Txn_ID), payload);
+            
             this.closeModal('acc-modal');
-            this.fetchData();
+            // 注意：這裡把 this.fetchData(); 刪掉了！
         } catch (e) {
             alert("錯誤: " + e.message);
         } finally {
@@ -441,6 +473,7 @@ const app = {
 
     openInstModal: function(id = null) {
         const modal = document.getElementById('inst-modal');
+        const btnDel = document.getElementById('btn-del-i');
         const inputs = document.querySelectorAll('#inst-modal input, #inst-modal select');
         
         this.fillMemberSelect('Manager_ID');
@@ -454,8 +487,9 @@ const app = {
         
         if (id) {
             document.getElementById('i-modal-title').innerText = "編輯儀器";
-            const inst = this.data.instruments.find(x => x.Instrument_ID === id);
+            if (btnDel) btnDel.classList.remove('hidden');
             
+            const inst = this.data.instruments.find(x => x.Instrument_ID === id);
             inputs.forEach(el => {
                 if (el.id && inst[el.id] !== undefined) {
                     let val = inst[el.id];
@@ -463,10 +497,20 @@ const app = {
                     el.value = val;
                 }
             });
-            document.getElementById('Instrument_ID').disabled = true;
         } else {
             document.getElementById('i-modal-title').innerText = "新增儀器";
-            document.getElementById('Instrument_ID').disabled = false;
+            if (btnDel) btnDel.classList.add('hidden');
+            // 自動產生含秒數與亂碼的 ID
+            const now = new Date();
+            const timeCode = now.getFullYear() + 
+                String(now.getMonth()+1).padStart(2,'0') + 
+                String(now.getDate()).padStart(2,'0') + 
+                String(now.getHours()).padStart(2,'0') + 
+                String(now.getMinutes()).padStart(2,'0') +
+                String(now.getSeconds()).padStart(2,'0');
+            const randomCode = Math.floor(Math.random() * 900) + 100;
+            
+            document.getElementById('Instrument_ID').value = `INST_${timeCode}_${randomCode}`;
             document.getElementById('Is_Active').value = 'TRUE';
         }
         modal.classList.remove('hidden');
@@ -478,19 +522,14 @@ const app = {
         const payload = {};
         document.querySelectorAll('#inst-modal input, #inst-modal select').forEach(el => payload[el.id] = el.value);
 
-        if(!confirm("確定儲存儀器資料？")) return;
         const btn = document.getElementById('btn-save-i');
         btn.innerText = "儲存中...";
         btn.disabled = true;
 
         try {
-            await fetch(GAS_URL, {
-                method: 'POST',
-                body: JSON.stringify({ type: "saveInstrument", data: payload })
-            });
-            alert("儲存成功！");
+            await setDoc(doc(db, "instruments", payload.Instrument_ID), payload);
+            
             this.closeModal('inst-modal');
-            this.fetchData();
         } catch (e) {
             alert("錯誤: " + e.message);
         } finally {
@@ -595,7 +634,7 @@ const app = {
     openLogModal: function(id = null) {
         const modal = document.getElementById('log-modal');
         const inputs = document.querySelectorAll('#log-modal input, #log-modal select, #log-modal textarea');
-        
+        const btnDel = document.getElementById('btn-del-l')
         this.fillMemberSelect('Owner_ID');
 
         const locSelect = document.getElementById('Log_Location_Filter');
@@ -607,6 +646,7 @@ const app = {
 
         if (id) {
             document.getElementById('l-modal-title').innerText = "編輯維修紀錄";
+            btnDel.classList.remove('hidden');
             const log = this.data.logs.find(x => x.Log_ID === id);
             
             inputs.forEach(el => {
@@ -629,6 +669,7 @@ const app = {
 
         } else {
             document.getElementById('l-modal-title').innerText = "回報問題";
+            btnDel.classList.add('hidden');
             const now = new Date();
             const timeCode = now.getFullYear() +
                 String(now.getMonth()+1).padStart(2,'0') +
@@ -689,19 +730,14 @@ const app = {
         if (!payload.Instrument_ID) { alert("請選擇儀器"); return; }
         if (!payload.Problem_Desc) { alert("請填寫問題描述"); return; }
 
-        if(!confirm("確定儲存紀錄？")) return;
         const btn = document.getElementById('btn-save-l');
         btn.innerText = "儲存中...";
         btn.disabled = true;
 
         try {
-            await fetch(GAS_URL, {
-                method: 'POST',
-                body: JSON.stringify({ type: "saveLog", data: payload })
-            });
-            alert("儲存成功！");
+            await setDoc(doc(db, "logs", payload.Log_ID), payload);
+
             this.closeModal('log-modal');
-            this.fetchData();
         } catch (e) {
             alert("錯誤: " + e.message);
         } finally {
@@ -796,10 +832,12 @@ const app = {
     openMemberModal: function(id = null) {
         const modal = document.getElementById('member-modal');
         const inputs = document.querySelectorAll('#member-modal input, #member-modal select');
+        const btnDel = document.getElementById('btn-del-m');
         inputs.forEach(el => el.value = '');
 
         if (id) {
             document.getElementById('m-modal-title').innerText = "編輯成員";
+            btnDel.classList.remove('hidden');
             const m = this.data.members.find(x => x.Student_ID === id);
             inputs.forEach(el => {
                 if(el.id && m[el.id] !== undefined) { 
@@ -814,6 +852,7 @@ const app = {
             document.getElementById('Student_ID').disabled = true;
         } else {
             document.getElementById('m-modal-title').innerText = "新增成員";
+            btnDel.classList.add('hidden');
             document.getElementById('Student_ID').disabled = false;
             document.getElementById('Status').value = 'Active';
             document.getElementById('Role').value = 'User';
@@ -834,19 +873,13 @@ const app = {
         });
         payload['Student_ID'] = id;
 
-        if(!confirm("確定儲存成員資料？")) return;
         const btn = document.getElementById('btn-save-m');
         btn.innerText = "儲存中...";
         btn.disabled = true;
 
         try {
-            await fetch(GAS_URL, {
-                method: 'POST',
-                body: JSON.stringify({ type: "saveMember", data: payload })
-            });
-            alert("儲存成功！");
+            await setDoc(doc(db, "members", payload.Student_ID), payload);
             this.closeModal('member-modal');
-            this.fetchData();
         } catch (e) {
             alert("錯誤: " + e.message);
         } finally {
@@ -963,5 +996,7 @@ const app = {
         return `${year}-${month}-${day}`;
     }
 };
+
+window.app = app;
 
 document.addEventListener("DOMContentLoaded", () => app.init());

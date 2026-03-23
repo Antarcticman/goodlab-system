@@ -23,7 +23,6 @@
                 <input type="text" id="search-member" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()">
                 <div class="actions">
                     <button onclick="app.openMemberModal()" class="btn btn-primary">➕ 新增成員</button>
-                    <button onclick="app.fetchData()" class="btn btn-secondary">🔄 重新整理</button>
                 </div>
             </div>
             <div id="member-grid" class="member-grid">
@@ -41,7 +40,6 @@
                 </div>
                 <div class="actions">
                     <button onclick="app.openInstModal()" class="btn btn-primary">➕ 新增儀器</button>
-                    <button onclick="app.fetchData()" class="btn btn-secondary">🔄 重新整理</button>
                 </div>
             </div>
 
@@ -74,7 +72,6 @@
                 </div>
                 <div class="actions">
                     <button onclick="app.openLogModal()" class="btn btn-danger">🚨 回報問題</button>
-                    <button onclick="app.fetchData()" class="btn btn-secondary">🔄 重新整理</button>
                 </div>
             </div>
 
@@ -128,7 +125,6 @@
                 </div>
                 <div class="actions">
                     <button onclick="app.openAccModal()" class="btn btn-primary">💸 新增帳務</button>
-                    <button onclick="app.fetchData()" class="btn btn-secondary">🔄</button>
                 </div>
             </div>
 
@@ -169,7 +165,14 @@
                     <div class="form-group"><label>英文姓</label><input type="text" id="Surname_En"></div>
                 </div>
                 <div class="form-row">
-                    <div class="form-group"><label>系所</label><input type="text" id="Department" list="dept-list"></div>
+                    <div class="form-group">
+                        <label>系所</label>
+                        <select id="Department">
+                            <option value="電子所">電子所</option>
+                            <option value="光電所">光電所</option>
+                            <option value="重點科技學院">重點科技學院</option>
+                        </select>
+                    </div>
                     <div class="form-group"><label>狀態</label><select id="Status"><option value="Active">Active (在學)</option><option value="Alumni">Alumni (畢業)</option></select></div>
                 </div>
                 <div class="form-row">
@@ -182,7 +185,8 @@
                 </div>
                 <div class="form-group"><label>權限</label><select id="Role"><option value="User">User</option><option value="Admin">Admin</option></select></div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button onclick="app.deleteRecord('members', document.getElementById('Student_ID').value, 'member-modal')" class="btn btn-danger hidden" id="btn-del-m">刪除</button>
                 <button onclick="app.saveMember()" class="btn btn-primary" id="btn-save-m">儲存</button>
             </div>
         </div>
@@ -195,11 +199,17 @@
                 <button onclick="app.closeModal('inst-modal')" class="close-btn">&times;</button>
             </div>
             <div class="modal-body">
+                <input type="hidden" id="Instrument_ID">
                 <div class="form-row">
-                    <div class="form-group"><label>儀器 ID (Instrument_ID)</label><input type="text" id="Instrument_ID" placeholder="INST_01"></div>
-                    <div class="form-group"><label>財產編號 (Property_ID)</label><input type="text" id="Property_ID"></div>
+                    <div class="form-group">
+                        <label>儀器名稱 (Name)</label>
+                        <input type="text" id="Name">
+                    </div>
+                    <div class="form-group">
+                        <label>財產編號 (Property_ID)</label>
+                        <input type="text" id="Property_ID">
+                    </div>
                 </div>
-                <div class="form-group"><label>儀器名稱 (Name)</label><input type="text" id="Name"></div>
                 <div class="form-row">
                     <div class="form-group"><label>區域 (Location)</label><select id="Location"><option value="">請選擇區域</option></select></div>
                     <div class="form-group"><label>現況狀態 (Is_Active)</label><select id="Is_Active"><option value="TRUE">🟢 正常運作 (Active)</option><option value="FALSE">🔴 停用/報廢 (Inactive)</option></select></div>
@@ -208,7 +218,8 @@
                 <div class="form-group"><label>廠商資訊 (Vendor_Info)</label><input type="text" id="Vendor_Info" placeholder="廠商名、聯絡電話..."></div>
                 <div class="form-group"><label>手冊連結 (Manual_Link)</label><input type="text" id="Manual_Link" placeholder="Google Drive Link..."></div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button onclick="app.deleteRecord('instruments', document.getElementById('Instrument_ID').value, 'inst-modal')" class="btn btn-danger hidden" id="btn-del-i">刪除</button>
                 <button onclick="app.saveInstrument()" class="btn btn-primary" id="btn-save-i">儲存</button>
             </div>
         </div>
@@ -238,8 +249,9 @@
                 <div class="form-group"><label>解決方案 (Solution)</label><textarea id="Solution" rows="2" placeholder="維修過程、更換零件... (未解決可留空)"></textarea></div>
                 <div class="form-group"><label>負責人 (Manager)</label><select id="Owner_ID"><option value="">(選擇成員)</option></select></div>
             </div>
-            <div class="modal-footer">
-                <button onclick="app.saveLog()" class="btn btn-primary" id="btn-save-l">儲存紀錄</button>
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button onclick="app.deleteRecord('logs', document.getElementById('Log_ID').value, 'log-modal')" class="btn btn-danger hidden" id="btn-del-l">刪除</button>
+                <button onclick="app.saveLog()" class="btn btn-primary" id="btn-save-l">儲存</button>
             </div>
         </div>
     </div>
@@ -313,12 +325,13 @@
             </div> <div class="modal-footer">
 
             </div>
-            <div class="modal-footer">
-                <button onclick="app.saveAccounting()" class="btn btn-primary" id="btn-save-a">儲存帳務</button>
+            <div class="modal-footer" style="display: flex; justify-content: space-between;">
+                <button onclick="app.deleteRecord('accounting', document.getElementById('Txn_ID').value, 'acc-modal')" class="btn btn-danger hidden" id="btn-del-a">刪除</button>
+                <button onclick="app.saveAccounting()" class="btn btn-primary" id="btn-save-a">儲存</button>
             </div>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
 </body>
 </html>
