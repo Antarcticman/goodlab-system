@@ -34,7 +34,7 @@
             <div class="toolbar">
                 <div class="filters">
                     <input type="text" id="search-inst" placeholder="搜尋儀器名稱、廠商..." oninput="app.renderInstruments()">
-                    <select id="filter-location" onchange="app.renderInstruments()">
+                    <select id="filter-location" onchange="app.renderInstruments()" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px;">
                         <option value="">全部區域</option>
                     </select>
                 </div>
@@ -64,6 +64,9 @@
             <div class="toolbar">
                 <div class="filters">
                     <input type="text" id="search-log" placeholder="搜尋問題、儀器..." oninput="app.renderLogs()">
+                    <select id="filter-log-location" onchange="app.renderLogs()" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px;">
+                        <option value="">全部區域</option>
+                    </select>
                     <div class="status-filter-group">
                         <button class="filter-chip active" onclick="app.setLogFilter('All')" data-val="All">全部</button>
                         <button class="filter-chip" onclick="app.setLogFilter('Open')" data-val="Open">🔴 未解決</button>
@@ -98,9 +101,12 @@
             
             <div class="dashboard-grid">
                 <div class="dash-card">
-                    <h4>公積金餘額 (Balance)</h4>
+                    <h4>公積金總餘額 (Total Balance)</h4>
                     <div class="dash-value" id="val-balance">---</div>
-                    <small>實際戶頭金額</small>
+                    <div style="display:flex; justify-content:space-around; font-size:0.9rem; color:#666; margin-top:8px; border-top:1px solid #eee; padding-top:8px;">
+                        <span>🏦 戶頭: <span id="val-bank" style="font-weight:bold; color:#212529;">---</span></span>
+                        <span>💵 現金: <span id="val-cash" style="font-weight:bold; color:#212529;">---</span></span>
+                    </div>
                 </div>
                 <div class="dash-card danger">
                     <h4>待還代墊 (Payable)</h4>
@@ -271,7 +277,8 @@
                         <select id="Acc_Type" onchange="app.handleAccTypeChange()">
                             <option value="School">🏫 學校報帳 (會回沖)</option>
                             <option value="Lab">🧪 實驗室內帳 (不回沖)</option>
-                            <option value="Deposit">💰 匯入公積金 (老師)</option>
+                            <option value="Deposit">💰 匯入公積金 (老師給錢)</option>
+                            <option value="Withdrawal">🏧 銀行提款 (轉為現金)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -280,41 +287,51 @@
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label>項目說明 (Description)</label>
-                    <input type="text" id="Acc_Description" placeholder="ex: 購買光學桌螺絲">
-                </div>
-
-                <div class="form-row">
+                <div class="form-row" style="display: grid; grid-template-columns: 2fr 1fr;">
+                    <div class="form-group">
+                        <label>項目說明 (Description)</label>
+                        <input type="text" id="Acc_Description" placeholder="ex: 購買光學桌螺絲">
+                    </div>
                     <div class="form-group">
                         <label>金額 (Amount)</label>
-                        <input type="number" id="Acc_Amount" placeholder="請輸入金額 (ex: 500)">
-                    </div>
-                    <div class="form-group">
-                        <label>先付錢的人 (Payer)</label>
-                        <select id="Acc_Payer" onchange="app.handleAccPayerChange()">
-                            </select>
+                        <input type="number" id="Acc_Amount" placeholder="ex: 500">
                     </div>
                 </div>
-
-                <hr style="border:0; border-top:1px dashed #ccc; margin:10px 0;">
 
                 <div class="form-row">
-                    <div class="form-group" id="grp-recharge">
-                        <label>學校回沖日期</label>
-                        <input type="date" id="Recharge_Date">
-                        <small style="color:#888">空白=等待回沖</small>
+                    <div class="form-group">
+                        <label>先付錢的人 (Payer)</label>
+                        <select id="Acc_Payer" onchange="app.handleAccPayerChange()"></select>
                     </div>
-                    <div class="form-group" id="grp-payback">
-                        <label>還款給代墊人日期</label>
-                        <input type="date" id="Payback_Date">
-                        <small style="color:#888">空白=欠款中</small>
+                    
+                    <div class="form-group">
+                        <div id="grp-fund-source" style="display:none; flex-direction: column; gap: 5px;">
+                            <label>扣款來源 (Source)</label>
+                            <div class="status-filter-group" style="margin-top: 0; padding: 2px; height: 38px; display: flex;">
+                                <button type="button" class="filter-chip active" id="btn-fs-bank" onclick="app.setFundSource('Bank')" style="flex:1; padding:4px;">🏦 戶頭</button>
+                                <button type="button" class="filter-chip" id="btn-fs-cash" onclick="app.setFundSource('Cash')" style="flex:1; padding:4px;">💵 現金</button>
+                                <input type="hidden" id="Fund_Source" value="Bank">
+                            </div>
+                        </div>
+                        
+                        <div id="grp-payback" style="display:none; flex-direction: column; gap: 5px;">
+                            <label>還款給代墊人日期</label>
+                            <input type="date" id="Payback_Date" style="height: 38px; box-sizing: border-box;">
+                            <small style="color:#888; margin-top: -3px;">空白=欠款中</small>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label>發票/收據連結 (選填)</label>
-                    <input type="text" id="Invoice_Link">
+                <div class="form-row">
+                    <div class="form-group" id="grp-recharge" style="display: flex; flex-direction: column;">
+                        <label>學校回沖日期</label>
+                        <input type="date" id="Recharge_Date" style="height: 38px; box-sizing: border-box;">
+                        <small style="color:#888; margin-top: 3px;">空白=等待回沖</small>
+                    </div>
+                    <div class="form-group">
+                        <label>發票/收據連結 (選填)</label>
+                        <input type="text" id="Invoice_Link" placeholder="Google Drive 連結..." style="height: 38px; box-sizing: border-box;">
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -322,9 +339,8 @@
                     <textarea id="Acc_Remark" rows="2" placeholder="例如：口試委員點心費..."></textarea>
                 </div>
 
-            </div> <div class="modal-footer">
-
             </div>
+            
             <div class="modal-footer" style="display: flex; justify-content: space-between;">
                 <button onclick="app.deleteRecord('accounting', document.getElementById('Txn_ID').value, 'acc-modal')" class="btn btn-danger hidden" id="btn-del-a">刪除</button>
                 <button onclick="app.saveAccounting()" class="btn btn-primary" id="btn-save-a">儲存</button>

@@ -131,42 +131,49 @@ const app = {
 
     // 計算儀表板數字
     calcDashboard: function() {
-        let balance = 0;
-        let payable = 0;
-        let receivable = 0;
+        let bankBalance = 0; // 戶頭
+        let cashBalance = 0; // 現金
+        let payable = 0;     // 待還代墊
+        let receivable = 0;  // 等待回沖
 
         this.data.accounting.forEach(acc => {
-            const amt = parseFloat(acc.Amount) || 0;
+            const amt = Math.abs(parseFloat(acc.Amount) || 0);
             const isFund = acc.Payer === 'Fund';
-            const isRecharged = !!acc.Recharge_Date; // 有日期=True
-            const isPaidBack = !!acc.Payback_Date;   // 有日期=True
+            const isRecharged = !!acc.Recharge_Date;
+            const isPaidBack = !!acc.Payback_Date;
+            const source = acc.Fund_Source || 'Bank'; // 這筆交易動用的是 Bank 還是 Cash
 
-            // 1. 計算餘額 (Balance)
-            // 邏輯：存入 + 學校已回沖的錢 - 公積金直接付出去的 - 公積金還給學生的
+            // --- 狀態統計 ---
+            if (!isFund && !isPaidBack) payable += amt;
+            if (acc.Type === 'School' && !isRecharged) receivable += amt;
+
+            // --- 餘額計算 ---
             if (acc.Type === 'Deposit') {
-                balance += amt;
-            } else if (acc.Type === 'School') {
-                if (isRecharged) balance += Math.abs(amt); // 學校還錢進來了 (+)
-                if (isFund) balance -= Math.abs(amt);      // 公積金先付的 (-)
-                if (!isFund && isPaidBack) balance -= Math.abs(amt); // 還給學生 (-)
-            } else if (acc.Type === 'Lab') {
-                if (isFund) balance -= Math.abs(amt);      // 內帳公積金付 (-)
-                if (!isFund && isPaidBack) balance -= Math.abs(amt); // 內帳還學生 (-)
-            }
-
-            // 2. 計算待還代墊 (Payable) -> Payer是學生 且 還沒Payback
-            if (!isFund && !isPaidBack) {
-                payable += Math.abs(amt);
-            }
-
-            // 3. 計算等待回沖 (Receivable) -> Type是School 且 還沒Recharge
-            if (acc.Type === 'School' && !isRecharged) {
-                receivable += Math.abs(amt);
+                bankBalance += amt; // 老師匯錢通常直接進戶頭
+            } 
+            else if (acc.Type === 'Withdrawal') {
+                bankBalance -= amt; // 戶頭減少
+                cashBalance += amt; // 現金增加
+            } 
+            else if (acc.Type === 'School' || acc.Type === 'Lab') {
+                // 如果是公積金付錢 (或是已經還錢給代墊學生)
+                if (isFund || (!isFund && isPaidBack)) {
+                    if (source === 'Cash') cashBalance -= amt;
+                    else bankBalance -= amt;
+                }
+                // 學校回沖的錢，一律進戶頭
+                if (acc.Type === 'School' && isRecharged) {
+                    bankBalance += amt;
+                }
             }
         });
 
         // 更新 UI
-        document.getElementById('val-balance').innerText = "$" + balance.toLocaleString();
+        const totalBalance = bankBalance + cashBalance;
+        document.getElementById('val-balance').innerText = "$" + totalBalance.toLocaleString();
+        document.getElementById('val-bank').innerText = "$" + bankBalance.toLocaleString();
+        document.getElementById('val-cash').innerText = "$" + cashBalance.toLocaleString();
+        
         document.getElementById('val-payable').innerText = "$" + payable.toLocaleString();
         document.getElementById('val-receivable').innerText = "$" + receivable.toLocaleString();
     },
@@ -262,6 +269,7 @@ const app = {
         if(type === 'School') return '🏫 報帳';
         if(type === 'Lab') return '🧪 內帳';
         if(type === 'Deposit') return '💰 匯入';
+        if(type === 'Withdrawal') return '🏧 提款'; // ★ 補上這行
         return type;
     },
 
@@ -278,7 +286,13 @@ const app = {
         const inputs = document.querySelectorAll('#acc-modal input, #acc-modal select, #acc-modal textarea');
         
         this.fillPayerSelect('Acc_Payer');
-        inputs.forEach(el => el.value = ''); // 清空所有欄位 (包含新的 textarea)
+        inputs.forEach(el => {
+            if(el.type === 'radio') {
+                el.checked = false; // radio 只取消勾選，不刪除 value
+            } else {
+                el.value = '';
+            }
+        });
 
         if (id) {
             document.getElementById('a-modal-title').innerText = "編輯帳務";
@@ -298,6 +312,8 @@ const app = {
             
             // ★ 新增：回填備註
             document.getElementById('Acc_Remark').value = acc.Remark || '';
+            const fs = acc.Fund_Source || 'Bank';
+            this.setFundSource(fs);
 
         } else {
             document.getElementById('a-modal-title').innerText = "新增帳務";
@@ -308,6 +324,7 @@ const app = {
             document.getElementById('Acc_Date').value = this.formatDateForInput(new Date());
             document.getElementById('Acc_Type').value = 'School';
             document.getElementById('Acc_Payer').value = 'Fund';
+            this.setFundSource('Bank');
         }
         
         this.handleAccTypeChange();
@@ -316,20 +333,74 @@ const app = {
         modal.classList.remove('hidden');
     },
 
-    // UI 連動：類型改變時，隱藏/顯示回沖日期
+    // 控制扣款來源按鈕的 UI 與取值
+    setFundSource: function(source) {
+        const fsInput = document.getElementById('Fund_Source');
+        if (fsInput) fsInput.value = source;
+        
+        const btnBank = document.getElementById('btn-fs-bank');
+        const btnCash = document.getElementById('btn-fs-cash');
+        if (btnBank) {
+            if(source === 'Bank') btnBank.classList.add('active'); else btnBank.classList.remove('active');
+        }
+        if (btnCash) {
+            if(source === 'Cash') btnCash.classList.add('active'); else btnCash.classList.remove('active');
+        }
+    },
+
+    // UI 連動：類型改變時
     handleAccTypeChange: function() {
         const type = document.getElementById('Acc_Type').value;
         const divRecharge = document.getElementById('grp-recharge');
+        const payerSelect = document.getElementById('Acc_Payer');
+        const descInput = document.getElementById('Acc_Description');
+        
         // 只有 School 需要回沖日期
         divRecharge.style.visibility = (type === 'School') ? 'visible' : 'hidden';
+
+        // ★ 自動化防呆：提款或匯入時，自動填寫名稱並鎖定
+        if (type === 'Withdrawal') {
+            descInput.value = "🏧 銀行提款";
+            this.setFundSource('Bank');
+        } else if (type === 'Deposit') {
+            descInput.value = "💰 匯入公積金";
+        } else {
+            // 切換回報帳/內帳時，清空預設字
+            if(descInput.value === "🏧 銀行提款" || descInput.value === "💰 匯入公積金") {
+                descInput.value = "";
+            }
+        }
+
+        // 如果是提款或匯入，強制 Payer 鎖定為 Fund
+        if (type === 'Withdrawal' || type === 'Deposit') {
+            payerSelect.value = 'Fund';
+            payerSelect.disabled = true;
+        } else {
+            payerSelect.disabled = false;
+        }
+        this.handleAccPayerChange(); 
     },
 
-    // UI 連動：付款人改變時，隱藏/顯示還款日期
     handleAccPayerChange: function() {
         const payer = document.getElementById('Acc_Payer').value;
+        const type = document.getElementById('Acc_Type').value;
         const divPayback = document.getElementById('grp-payback');
-        // 如果是 Fund 付的，就不需要還款日期
-        divPayback.style.visibility = (payer === 'Fund') ? 'hidden' : 'visible';
+        const divFundSource = document.getElementById('grp-fund-source');
+
+        // ★ 改用 display 來動態切換，讓兩者完美共用同一格空間
+        if (payer === 'Fund' || type === 'Deposit' || type === 'Withdrawal') {
+            divPayback.style.display = 'none';
+        } else {
+            divPayback.style.display = 'flex';
+        }
+
+        if (type === 'Deposit' || type === 'Withdrawal') {
+            divFundSource.style.display = 'none';
+        } else if (payer === 'Fund') {
+            divFundSource.style.display = 'flex';
+        } else {
+            divFundSource.style.display = 'none'; 
+        }
     },
 
     saveAccounting: async function() {
@@ -345,6 +416,8 @@ const app = {
             rawAmount = Math.abs(rawAmount);  
         }
 
+        const fundSourceVal = document.getElementById('Fund_Source').value || 'Bank';
+
         const payload = {
             Txn_ID: document.getElementById('Txn_ID').value,
             Type: type,
@@ -355,9 +428,9 @@ const app = {
             Recharge_Date: document.getElementById('Recharge_Date').value,
             Payback_Date: document.getElementById('Payback_Date').value,
             Invoice_Link: document.getElementById('Invoice_Link').value,
-            
-            // ★ 新增：傳送備註資料 (Key 必須跟 Google Sheet 的標題一樣)
-            Remark: document.getElementById('Acc_Remark').value
+            Remark: document.getElementById('Acc_Remark').value,
+            // ★ 新增這行：記錄是從戶頭還是現金扣款 (預設 Bank)
+            Fund_Source: fundSourceVal
         };
 
         if (!payload.Description || !payload.Amount) { alert("請填寫項目和金額"); return; }
@@ -556,25 +629,46 @@ const app = {
         });
     },
 
+    updateLogLocationFilter: function() {
+        const select = document.getElementById('filter-log-location');
+        if (!select || select.options.length > 1) return; // 如果已經有選項就不重複加
+
+        // 從儀器清單抓出所有不重複的地點
+        const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean);
+        locations.sort().forEach(loc => {
+            const opt = document.createElement('option');
+            opt.value = loc;
+            opt.innerText = loc;
+            select.appendChild(opt);
+        });
+    },
+
     renderLogs: function() {
         const tbody = document.getElementById('log-tbody');
         const term = document.getElementById('search-log').value.toLowerCase();
         const statusFilter = this.logFilterStatus;
+        const locFilter = document.getElementById('filter-log-location').value; // ★ 1. 取得選擇的地點
+
+        this.updateLogLocationFilter(); // ★ 2. 確保下拉選單有選項
 
         let filtered = this.data.logs.filter(log => {
             const inst = this.data.instruments.find(i => i.Instrument_ID === log.Instrument_ID);
             const instName = inst ? inst.Name : log.Instrument_ID;
+            const instLoc = inst ? inst.Location : ""; // ★ 取得該儀器的地點
             
             const text = (log.Problem_Desc + instName + log.Log_ID).toLowerCase();
             const matchText = text.includes(term);
             const matchStatus = statusFilter === 'All' ? true : log.Status === statusFilter;
+            const matchLoc = locFilter ? instLoc === locFilter : true; // ★ 3. 判斷地點是否符合
             
-            return matchText && matchStatus;
+            return matchText && matchStatus && matchLoc;
         });
 
+        // ★ 4. 更改排序邏輯：純看日期往下排 (新 -> 舊)，拿掉嚴重程度的排序
         filtered.sort((a, b) => {
-            if (a.Status !== b.Status) return a.Status === 'Open' ? -1 : 1; 
-            if (a.Urgency !== b.Urgency) return b.Urgency - a.Urgency; 
+            // 如果你還是希望「未解決(Open)」的單子優先置頂，可以把下面這行解除註解：
+            // if (a.Status !== b.Status) return a.Status === 'Open' ? -1 : 1; 
+            
             return new Date(b.Date_Reported) - new Date(a.Date_Reported); 
         });
 
