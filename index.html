@@ -8,19 +8,18 @@
 </head>
 <body>
     <div class="container">
-        <header style="display: flex; justify-content: space-between; align-items: center; flex-direction: row; flex-wrap: wrap;">
-            <div style="display: flex; gap: 15px; align-items: center;">
-                <div class="brand">GOODLAB <span class="badge">v4.0</span></div>
-                <nav class="nav-tabs">
-                    <button class="nav-btn" onclick="app.switchTab('members')">👥 <span>人員管理</span></button>
-                    <button class="nav-btn" onclick="app.switchTab('instruments')">🔬 <span>儀器設備</span></button>
-                    <button class="nav-btn" onclick="app.switchTab('logs')">🛠️ <span>維修紀錄</span></button>
-                    <button id="nav-accounting" class="nav-btn active" onclick="app.switchTab('accounting')">💰 <span>公積金</span></button>
-                </nav>
-            </div>
+        <header class="main-header">
+            <div class="brand">GOODLAB <span class="badge">v4.0</span></div>
             
-            <div id="auth-section" style="display: flex; align-items: center; gap: 10px;">
-                <span id="user-info" style="font-size: 0.9rem; color: #666; font-weight: bold;">讀取中...</span>
+            <nav class="nav-tabs">
+                <button class="nav-btn" onclick="app.switchTab('members')">👥 <span>人員管理</span></button>
+                <button class="nav-btn" onclick="app.switchTab('instruments')">🔬 <span>儀器設備</span></button>
+                <button class="nav-btn" onclick="app.switchTab('logs')">🛠️ <span>維修紀錄</span></button>
+                <button id="nav-accounting" class="nav-btn active" onclick="app.switchTab('accounting')">💰 <span>公積金</span></button>
+            </nav>
+
+            <div id="auth-section" class="auth-section">
+                <span id="user-info" class="user-info-text">讀取中...</span>
                 <button id="btn-login" onclick="app.login()" class="btn btn-primary btn-sm hidden">Google 登入</button>
                 <button id="btn-logout" onclick="app.logout()" class="btn btn-secondary btn-sm hidden">登出</button>
             </div>
@@ -182,7 +181,7 @@
             </div>
         </div>
     </div>
-    
+
     <div id="member-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
