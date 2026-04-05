@@ -1,7 +1,8 @@
 // === script.js 最上方 ===
 // 1. 引入 Firebase 模組
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 // 2. 填入你的專屬金鑰
 const firebaseConfig = {
   apiKey: "AIzaSyBdgqZaW2jdJHTbKplPur2R6JxDyjb02PU",
@@ -15,6 +16,10 @@ const firebaseConfig = {
 // 3. 初始化資料庫
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
+
+// 初始化登入模組
+const auth = getAuth(firebaseApp);
+const provider = new GoogleAuthProvider();
 
 // 4. 原本的 app 結構
 const app = {
@@ -35,6 +40,155 @@ const app = {
         this.setupLogAutoStatus();
         this.updateFilterUI();
         this.updateAccFilterUI();
+        this.setupAuthListener();
+    },
+    // === 登入狀態變數 ===
+    currentUser: null,
+    currentRole: 'Guest', // 'Guest', 'User', 'Admin'
+    membersLoaded: false, // ★ 新增：確保資料庫載入完成的標記
+
+    // === 登入/登出函式 ===
+    login: async function() {
+        try {
+            await signInWithPopup(auth, provider);
+        } catch (error) {
+            this.showNotification("登入失敗: " + e.message, 'error');
+        }
+    },
+
+    logout: async function() {
+        try {
+            await signOut(auth);
+        } catch (error) {
+            this.showNotification("登出失敗", 'error');
+        }
+    },
+
+    // === 監聽登入狀態 ===
+    setupAuthListener: function() {
+        onAuthStateChanged(auth, (user) => {
+            this.currentUser = user;
+            this.checkUserRole(); // 狀態改變時，交給中控室檢查
+        });
+    },
+
+    // === 權限中控室 (解決非同步時間差) ===
+    checkUserRole: function() {
+        const btnLogin = document.getElementById('btn-login');
+        const btnLogout = document.getElementById('btn-logout');
+        const userInfo = document.getElementById('user-info');
+
+        // 1. 如果沒有登入
+        if (!this.currentUser) {
+            this.currentRole = 'Guest';
+            btnLogin.classList.remove('hidden');
+            btnLogout.classList.add('hidden');
+            userInfo.innerText = "尚未登入";
+            this.updateUIByRole();
+            return;
+        }
+
+        // 2. 如果登入了，但資料庫名單還沒下載完，先卡住等待
+        if (!this.membersLoaded) {
+            userInfo.innerText = "讀取權限中...";
+            return; // 等等 onSnapshot 下載完會自動再呼叫一次這裡
+        }
+
+        // 3. 雙方都準備好了，開始比對
+        btnLogin.classList.add('hidden');
+        btnLogout.classList.remove('hidden');
+
+        const memberData = this.data.members.find(m => m.Google_UID === this.currentUser.uid);
+
+        if (memberData) {
+            // 找到綁定資料：顯示權限並解鎖
+            this.currentRole = memberData.Role === 'Admin' ? 'Admin' : 'User';
+            userInfo.innerText = `👤 ${memberData.Name_Ch} (${this.currentRole})`;
+            this.closeModal('bind-modal'); // 萬一視窗開著就關掉
+        } else {
+            // 找不到綁定資料：視為訪客並跳出專屬 Modal
+            this.currentRole = 'Guest';
+            userInfo.innerText = `👤 ${this.currentUser.displayName} (未綁定)`;
+            document.getElementById('bind-modal').classList.remove('hidden');
+        }
+
+        this.updateUIByRole();
+    },
+
+    // === 新增：自訂綁定視窗邏輯 ===
+    cancelBinding: function() {
+        this.closeModal('bind-modal');
+        this.showNotification("已取消綁定，你目前將以「訪客」身分瀏覽。", "info");
+    },
+
+    submitBinding: async function() {
+        const input = document.getElementById('Bind_Input_ID').value.trim().toLowerCase();
+        if (!input) {
+            this.showNotification("⚠️ 請輸入學號", "error");
+            return;
+        }
+
+        const member = this.data.members.find(m => m.Student_ID.toLowerCase() === input);
+        
+        if (!member) {
+            this.showNotification("❌ 找不到此學號！請確認是否輸入正確。", "error");
+            await this.logout();
+            this.closeModal('bind-modal');
+            return;
+        }
+
+        if (member.Google_UID) {
+            this.showNotification("❌ 這個學號已經被其他 Google 帳號綁定了！", "error");
+            await this.logout();
+            this.closeModal('bind-modal');
+            return;
+        }
+
+        // 開始寫入綁定資料
+        const btn = document.getElementById('btn-submit-bind');
+        btn.innerText = "綁定中...";
+        btn.disabled = true;
+
+        try {
+            await updateDoc(doc(db, "members", member.Student_ID), {
+                Google_UID: this.currentUser.uid
+            });
+            
+            this.showNotification("🎉 綁定成功！畫面即將重整...", 'success');
+            setTimeout(() => window.location.reload(), 1500); 
+        } catch (e) {
+            this.showNotification("❌ 綁定失敗: " + e.message, 'error');
+            btn.innerText = "確認綁定";
+            btn.disabled = false;
+        }
+    },
+
+    // === 根據權限隱藏/顯示按鈕 ===
+    updateUIByRole: function() {
+        const isAdmin = this.currentRole === 'Admin';
+        
+        // 1. 上方的「新增」按鈕直接變灰 Disabled
+        document.querySelectorAll('.admin-only').forEach(el => {
+            el.disabled = !isAdmin; 
+        });
+
+        // 2. 導覽列的「公積金」按鈕變灰 Disabled
+        const accNavBtn = document.getElementById('nav-accounting');
+        if (accNavBtn) {
+            accNavBtn.disabled = !isAdmin;
+        }
+
+        // 3. 防呆：如果權限不足卻在公積金頁面，自動切換回人員頁面
+        const currentPage = document.querySelector('.page-section.active');
+        if (currentPage && currentPage.id === 'page-accounting' && !isAdmin) {
+            this.switchTab('members'); 
+        }
+
+        // 4. 重新渲染所有表格 (帶入按鈕禁用邏輯)
+        this.renderMembers();
+        this.renderInstruments();
+        this.renderLogs();
+        this.renderAccounting();
     },
 
     // ================= 共用刪除邏輯 =================
@@ -44,7 +198,7 @@ const app = {
             await deleteDoc(doc(db, collectionName, id));
             this.closeModal(modalId);
         } catch (e) {
-            alert("刪除失敗: " + e.message);
+            this.showNotification("❌ 刪除失敗: " + e.message, 'error');
         }
     },
 
@@ -84,7 +238,9 @@ const app = {
         // 2. 即時監聽人員 (Members)
         onSnapshot(collection(db, "members"), (snapshot) => {
             this.data.members = snapshot.docs.map(doc => doc.data());
+            this.membersLoaded = true; // ★ 標記載入完成
             this.renderMembers();
+            this.checkUserRole(); // ★ 資料來了，重新檢查一次權限
         });
 
         // 3. 即時監聽儀器 (Instruments)
@@ -189,15 +345,16 @@ const app = {
         });
         
         if (Object.keys(debts).length === 0) {
-            alert("目前沒有欠任何人錢！🎉");
+            this.showNotification("目前沒有欠任何人錢！🎉", 'success');
             return;
         }
 
-        let msg = "待還款明細：\n----------------\n";
+        let msg = "<strong>待還款明細：</strong><br>";
         for (let [name, amt] of Object.entries(debts)) {
-            msg += `${name}: $${amt}\n`;
+            msg += `${name}: $${amt}<br>`;
         }
-        alert(msg);
+        // 第三個參數 5000 代表這則通知會停留 5 秒讓你看清楚
+        this.showNotification(msg, 'info', 5000); 
     },
 
     renderAccounting: function() {
@@ -281,6 +438,7 @@ const app = {
     },
 
     openAccModal: function(id = null) {
+        if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('acc-modal');
         const btnDel = document.getElementById('btn-del-a');
         const inputs = document.querySelectorAll('#acc-modal input, #acc-modal select, #acc-modal textarea');
@@ -433,7 +591,7 @@ const app = {
             Fund_Source: fundSourceVal
         };
 
-        if (!payload.Description || !payload.Amount) { alert("請填寫項目和金額"); return; }
+        if (!payload.Description || !payload.Amount) { this.showNotification("⚠️ 請填寫項目和金額", 'error'); return; }
 
         const btn = document.getElementById('btn-save-a');
         btn.innerText = "儲存中...";
@@ -446,7 +604,7 @@ const app = {
             this.closeModal('acc-modal');
             // 注意：這裡把 this.fetchData(); 刪掉了！
         } catch (e) {
-            alert("錯誤: " + e.message);
+            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;
@@ -506,6 +664,7 @@ const app = {
             return;
         }
 
+        const isAdmin = this.currentRole === 'Admin';
         tbody.innerHTML = filtered.map(inst => {
             const isActive = String(inst.Is_Active).toUpperCase() === 'TRUE';
             const manager = this.data.members.find(m => m.Student_ID === inst.Manager_ID);
@@ -524,7 +683,7 @@ const app = {
                 <td style="color:#666; font-size:0.9em;">${vendor}</td>
                 <td>${managerName}</td>
                 <td>
-                    <button onclick="app.openInstModal('${inst.Instrument_ID}')" class="btn btn-sm btn-secondary" style="white-space:nowrap;">✏️</button>
+                    <button onclick="app.openInstModal('${inst.Instrument_ID}')" class="btn btn-sm btn-secondary" style="white-space:nowrap;" ${isAdmin ? '' : 'disabled'}>✏️</button>
                 </td>
             </tr>
             `;
@@ -545,6 +704,7 @@ const app = {
     },
 
     openInstModal: function(id = null) {
+        if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('inst-modal');
         const btnDel = document.getElementById('btn-del-i');
         const inputs = document.querySelectorAll('#inst-modal input, #inst-modal select');
@@ -604,7 +764,7 @@ const app = {
             
             this.closeModal('inst-modal');
         } catch (e) {
-            alert("錯誤: " + e.message);
+            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;
@@ -677,6 +837,7 @@ const app = {
             return;
         }
 
+        const isAdmin = this.currentRole === 'Admin';
         tbody.innerHTML = filtered.map(log => {
             const isOpen = log.Status === 'Open';
             const inst = this.data.instruments.find(i => i.Instrument_ID === log.Instrument_ID);
@@ -686,11 +847,11 @@ const app = {
             const dateDisplay = this.formatDateForInput(log.Date_Reported);
 
             return `
-            <tr class="log-row ${isOpen ? 'open' : 'closed'}" onclick="app.openLogModal('${log.Log_ID}')" style="cursor:pointer;">
+            <tr class="log-row ${isOpen ? 'open' : 'closed'} ${isAdmin ? '' : 'disabled'}" ${isAdmin ? `onclick="app.openLogModal('${log.Log_ID}')"` : ''}>
                 <td style="text-align:center;">
                     <button class="resolve-btn ${!isOpen ? 'checked' : ''}" 
-                        onclick="event.stopPropagation(); app.quickResolve('${log.Log_ID}')" 
-                        title="${isOpen ? '點擊解決' : '已解決'}">
+                        ${isAdmin ? `onclick="event.stopPropagation(); app.quickResolve('${log.Log_ID}')"` : ''} 
+                        title="${isOpen ? '點擊解決' : '已解決'}" ${isAdmin ? '' : 'disabled'}>
                         ${isOpen ? '' : '✔'}
                     </button>
                 </td>
@@ -703,7 +864,7 @@ const app = {
                 <td style="max-width:250px; color:#198754;">${log.Solution || ''}</td>
                 <td>${ownerName}</td>
                 <td>
-                    <button onclick="event.stopPropagation(); app.openLogModal('${log.Log_ID}')" class="btn btn-sm btn-secondary">✏️</button>
+                    <button onclick="event.stopPropagation(); app.openLogModal('${log.Log_ID}')" class="btn btn-sm btn-secondary" ${isAdmin ? '' : 'disabled'}>✏️</button>
                 </td>
             </tr>
             `;
@@ -726,6 +887,7 @@ const app = {
     },
 
     openLogModal: function(id = null) {
+        if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('log-modal');
         const inputs = document.querySelectorAll('#log-modal input, #log-modal select, #log-modal textarea');
         const btnDel = document.getElementById('btn-del-l')
@@ -833,7 +995,7 @@ const app = {
 
             this.closeModal('log-modal');
         } catch (e) {
-            alert("錯誤: " + e.message);
+            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;
@@ -860,6 +1022,8 @@ const app = {
             grid.innerHTML = '<div class="empty">查無資料</div>';
             return;
         }
+
+        const isAdmin = this.currentRole === 'Admin';
 
         grid.innerHTML = filtered.map(m => {
             const isAlumni = m.Status === 'Alumni';
@@ -901,7 +1065,7 @@ const app = {
                 : '';
 
             return `
-            <div class="card ${isAlumni ? 'alumni' : ''}" onclick="app.openMemberModal('${m.Student_ID}')">
+            <div class="card ${isAlumni ? 'alumni' : ''} ${isAdmin ? '' : 'disabled'}" ${isAdmin ? `onclick="app.openMemberModal('${m.Student_ID}')"` : ''}>
                 
                 <div class="card-header-flex">
                     <h3>
@@ -924,6 +1088,7 @@ const app = {
     },
 
     openMemberModal: function(id = null) {
+        if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('member-modal');
         const inputs = document.querySelectorAll('#member-modal input, #member-modal select');
         const btnDel = document.getElementById('btn-del-m');
@@ -944,14 +1109,40 @@ const app = {
                 }
             });
             document.getElementById('Student_ID').disabled = true;
+            // 回填綁定狀態
+            if (m.Google_UID) {
+                document.getElementById('Bind_Status').value = "✅ 已綁定";
+                document.getElementById('btn-unbind').classList.remove('hidden');
+            } else {
+                document.getElementById('Bind_Status').value = "❌ 未綁定";
+                document.getElementById('btn-unbind').classList.add('hidden');
+            }
         } else {
             document.getElementById('m-modal-title').innerText = "新增成員";
+            document.getElementById('Bind_Status').value = "❌ 未綁定";
+            document.getElementById('btn-unbind').classList.add('hidden');
             btnDel.classList.add('hidden');
             document.getElementById('Student_ID').disabled = false;
             document.getElementById('Status').value = 'Active';
             document.getElementById('Role').value = 'User';
         }
         modal.classList.remove('hidden');
+    },
+
+    unbindMember: async function() {
+        const id = document.getElementById('Student_ID').value;
+        if (!confirm("確定要解除這位成員的 Google 綁定嗎？\n他下次登入時需要重新輸入學號。")) return;
+        
+        try {
+            await updateDoc(doc(db, "members", id), {
+                Google_UID: null // 清空 UID
+            });
+            document.getElementById('Bind_Status').value = "❌ 未綁定";
+            document.getElementById('btn-unbind').classList.add('hidden');
+            this.showNotification("✅ 已成功解除綁定！");
+        } catch (e) {
+            this.showNotification("❌ 解除失敗: " + e.message, 'error');
+        }
     },
 
     saveMember: async function() {
@@ -975,7 +1166,7 @@ const app = {
             await setDoc(doc(db, "members", payload.Student_ID), payload);
             this.closeModal('member-modal');
         } catch (e) {
-            alert("錯誤: " + e.message);
+            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;
@@ -995,6 +1186,28 @@ const app = {
         });
     },
 
+    // ================= 通知系統 =================
+    showNotification: function(msg, type = 'info', duration = 3000) {
+        let container = document.getElementById('toast-container');
+        // 如果 HTML 裡沒有容器，就自動建一個
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'toast-container';
+            container.className = 'toast-container';
+            document.body.appendChild(container);
+        }
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `<span>${msg}</span>`;
+        container.appendChild(toast);
+
+        // 設定時間到自動淡出並刪除
+        setTimeout(() => {
+            toast.classList.add('fadeOut');
+            setTimeout(() => toast.remove(), 300); // 等待淡出動畫播完
+        }, duration);
+    },
     // ================= 共用工具 =================
 
     closeModal: function(modalId) {
