@@ -3,382 +3,519 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GOODLAB 實驗室管理</title>
+    <title>GOODLAB 實驗室管理系統</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header class="main-header">
-            <div class="brand">GOODLAB <span class="badge">v4.0</span></div>
-            
-            <nav class="nav-tabs">
-                <button class="nav-btn" onclick="app.switchTab('members')">👥 <span>人員管理</span></button>
-                <button class="nav-btn" onclick="app.switchTab('instruments')">🔬 <span>儀器設備</span></button>
-                <button class="nav-btn" onclick="app.switchTab('logs')">🛠️ <span>維修紀錄</span></button>
-                <button id="nav-accounting" class="nav-btn active" onclick="app.switchTab('accounting')">💰 <span>公積金</span></button>
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">GOODLAB <span style="font-size: 0.7rem; color: var(--primary);">PRO</span></div>
+            <nav class="sidebar-nav">
+                <button class="nav-item active" onclick="app.switchTab('members')"><i class="ph ph-users"></i> 人員管理</button>
+                <button class="nav-item" onclick="app.switchTab('instruments')"><i class="ph ph-microscope"></i> 儀器設備</button>
+                <button class="nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench"></i> 維修紀錄</button>
+                <button class="nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> 公積金報帳</button>
+                <button class="nav-item" onclick="app.switchTab('inventory')"><i class="ph ph-barcode"></i> 產編清點</button>
             </nav>
+        </aside>
 
-            <div id="auth-section" class="auth-section">
-                <span id="user-info" class="user-info-text">讀取中...</span>
-                <button id="btn-login" onclick="app.login()" class="btn btn-primary btn-sm hidden">Google 登入</button>
-                <button id="btn-logout" onclick="app.logout()" class="btn btn-secondary btn-sm hidden">登出</button>
-            </div>
-        </header>
-
-        <main id="page-members" class="page-section hidden">
-            <div class="toolbar">
-                <input type="text" id="search-member" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()">
-                <div class="actions">
-                    <button onclick="app.openMemberModal()" class="btn btn-primary admin-only">➕ 新增成員</button>
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="page-title" id="current-page-title">人員管理</div>
+                <div class="auth-zone">
+                    <button onclick="app.openHelpModal()" class="btn-help" style="border:none; background:none; cursor:pointer;"><i class="ph ph-question" style="font-size: 1.2rem; color: var(--secondary);"></i></button>
+                    <span id="user-info" style="font-size: 0.9rem; color: var(--secondary); font-weight: 500;">讀取中...</span>
+                    <button id="btn-login" class="btn btn-primary btn-sm hidden" onclick="app.login()">Google 登入</button>
+                    <button id="btn-logout" class="btn btn-secondary btn-sm hidden" onclick="app.logout()">登出</button>
                 </div>
-            </div>
-            <div id="member-grid" class="member-grid">
-                <div class="loading">載入中...</div>
-            </div>
-        </main>
+            </header>
 
-        <main id="page-instruments" class="page-section hidden">
-            <div class="toolbar">
-                <div class="filters">
-                    <input type="text" id="search-inst" placeholder="搜尋儀器名稱、廠商..." oninput="app.renderInstruments()">
-                    <select id="filter-location" onchange="app.renderInstruments()" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px;">
-                        <option value="">全部區域</option>
-                    </select>
-                </div>
-                <div class="actions">
-                    <button onclick="app.openInstModal()" class="btn btn-primary admin-only">➕ 新增儀器</button>
-                </div>
-            </div>
-
-            <div class="table-container">
-                <table id="inst-table">
-                    <thead>
-                        <tr>
-                            <th width="80" onclick="app.sortInstruments('Is_Active')" class="sortable">狀態</th>
-                            <th onclick="app.sortInstruments('Name')" class="sortable">儀器名稱</th>
-                            <th width="120" onclick="app.sortInstruments('Location')" class="sortable">區域</th>
-                            <th width="150" onclick="app.sortInstruments('Vendor_Info')" class="sortable">廠商</th>
-                            <th width="120" onclick="app.sortInstruments('Manager_ID')" class="sortable">負責人</th>
-                            <th style="width: 100px; white-space: nowrap;">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="inst-tbody"></tbody>
-                </table>
-            </div>
-        </main>
-
-        <main id="page-logs" class="page-section hidden">
-            <div class="toolbar">
-                <div class="filters">
-                    <input type="text" id="search-log" placeholder="搜尋問題、儀器..." oninput="app.renderLogs()">
-                    <select id="filter-log-location" onchange="app.renderLogs()" style="padding: 8px; border: 1px solid var(--border); border-radius: 6px;">
-                        <option value="">全部區域</option>
-                    </select>
-                    <div class="status-filter-group">
-                        <button class="filter-chip active" onclick="app.setLogFilter('All')" data-val="All">全部</button>
-                        <button class="filter-chip" onclick="app.setLogFilter('Open')" data-val="Open">🔴 未解決</button>
-                        <button class="filter-chip" onclick="app.setLogFilter('Closed')" data-val="Closed">🟢 已解決</button>
+            <div class="page-container">
+                <section id="page-members" class="page-section active">
+                    <div class="action-bar">
+                        <div class="filters"><input type="text" id="search-member" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()" style="width:100%;"></div>
+                        <button onclick="app.openMemberModal()" class="btn btn-primary admin-only">新增成員</button>
                     </div>
-                </div>
-                <div class="actions">
-                    <button onclick="app.openLogModal()" class="btn btn-danger admin-only">🚨 回報問題</button>
-                </div>
-            </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:80px; text-align:center;">狀態</th>
+                                    <th>姓名</th>
+                                    <th class="hide-mobile">學號</th>
+                                    <th class="hide-mobile">系所</th>
+                                    <th style="width:100px;">權限</th>
+                                    <th style="width:80px; text-align:center;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="member-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
 
-            <div class="table-container">
-                <table id="log-table">
-                    <thead>
-                        <tr>
-                            <th width="60">解決</th>
-                            <th width="60">緊急</th>
-                            <th width="100">日期</th>
-                            <th width="150">儀器</th>
-                            <th>問題描述</th>
-                            <th>解決方案</th>
-                            <th width="100">負責人</th>
-                            <th width="80">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="log-tbody"></tbody>
-                </table>
+                <section id="page-instruments" class="page-section">
+                    <div class="action-bar">
+                        <div class="filters">
+                            <input type="text" id="search-inst" placeholder="搜尋儀器名稱..." oninput="app.renderInstruments()">
+                            <select id="filter-inst-loc" onchange="app.renderInstruments()"><option value="">所有區域</option></select>
+                        </div>
+                        <button onclick="app.openInstModal()" class="btn btn-primary admin-only">新增儀器</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th onclick="app.sortInstruments('Is_Active')" style="cursor:pointer; width:80px; text-align:center;">狀態 ⇅</th>
+                                    <th onclick="app.sortInstruments('Name')" style="cursor:pointer;">儀器名稱 ⇅</th>
+                                    <th style="width:120px;">區域</th>
+                                    <th class="hide-mobile" style="width:150px;">廠商資訊</th>
+                                    <th class="hide-mobile" style="width:120px;">負責人</th>
+                                    <th style="text-align:center; width:80px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inst-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section id="page-logs" class="page-section">
+                    <div class="action-bar">
+                        <div class="filters">
+                            <input type="text" id="search-log" placeholder="搜尋問題..." oninput="app.renderLogs()">
+                            <div class="filter-group">
+                                <button class="btn-filter filter-chip active" data-val="Open" onclick="app.setLogFilter('Open')">待處理</button>
+                                <button class="btn-filter filter-chip" data-val="Closed" onclick="app.setLogFilter('Closed')">已結案</button>
+                            </div>
+                        </div>
+                        <button onclick="app.openLogModal()" class="btn btn-primary">回報問題</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:80px; text-align:center;">狀態</th>
+                                    <th style="width:60px; text-align:center;">緊急</th>
+                                    <th style="width:110px;">日期</th>
+                                    <th style="width:150px;">儀器名稱</th>
+                                    <th class="hide-mobile">問題描述</th>
+                                    <th class="hide-mobile">解決方案</th>
+                                    <th class="hide-mobile" style="width:100px;">回報人</th>
+                                    <th style="width:80px; text-align:center;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="log-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section id="page-accounting" class="page-section">
+                    <div class="dashboard-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                        <div class="dashboard-card" style="display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--primary);">
+                            <div>
+                                <div style="color:var(--secondary); font-size:0.85rem;">實驗室總水位</div>
+                                <div id="val-balance" style="font-size:1.6rem; font-weight:bold; color:var(--text-main);">...</div>
+                            </div>
+                            <div style="text-align: right; font-size: 0.8rem; color: var(--secondary); display:flex; flex-direction:column; gap:4px;">
+                                <div style="background: var(--bg-page); padding: 2px 8px; border-radius: 4px;"><i class="ph ph-bank"></i> 戶頭: <span id="val-bank" style="font-weight:600; color:var(--primary);">...</span></div>
+                                <div style="background: var(--bg-page); padding: 2px 8px; border-radius: 4px;"><i class="ph ph-money"></i> 現金: <span id="val-cash" style="font-weight:600; color:var(--success);">...</span></div>
+                            </div>
+                        </div>
+                        
+                        <div class="dashboard-card" style="border-left: 4px solid var(--danger); cursor: pointer; transition: 0.2s;" onclick="app.showDebtsDetail()" onmouseover="this.style.transform='translateY(-2px)';" onmouseout="this.style.transform='translateY(0)';">
+                            <div style="color:var(--danger); font-size:0.85rem; display:flex; justify-content:space-between;">待還代墊款 <i class="ph ph-hand-coins" style="font-size:1.1rem;"></i></div>
+                            <div id="val-payable" style="font-size:1.6rem; font-weight:bold; color:var(--danger);">...</div>
+                            <div style="font-size:0.75rem; color:var(--secondary); margin-top:4px;">點擊查看欠款明細</div>
+                        </div>
+                        
+                        <div class="dashboard-card" style="border-left: 4px solid var(--warning); cursor: pointer; transition: 0.2s;" onclick="window.open('https://ntuacc.cc.ntu.edu.tw/acc/index.asp?campno=m&idtype=3', '_blank')" onmouseover="this.style.transform='translateY(-2px)';" onmouseout="this.style.transform='translateY(0)';">
+                            <div style="color:var(--warning); font-size:0.85rem; display:flex; justify-content:space-between;">待學校回沖 <i class="ph ph-arrow-square-out" style="font-size:1.1rem;"></i></div>
+                            <div id="val-receivable" style="font-size:1.6rem; font-weight:bold; color:var(--warning);">...</div>
+                            <div style="font-size:0.75rem; color:var(--secondary); margin-top:4px;">點擊前往報帳系統</div>
+                        </div>
+                    </div>
+
+                    <div class="action-bar">
+                        <div class="filters">
+                            <input type="text" id="search-acc" placeholder="搜尋項目..." oninput="app.renderAccounting()">
+                            <div class="filter-group">
+                                <button class="btn-filter filter-chip active" data-acc-val="All" onclick="app.setAccFilter('All')">全部</button>
+                                <button class="btn-filter filter-chip" data-acc-val="Debt" onclick="app.setAccFilter('Debt')">未還款</button>
+                            </div>
+                        </div>
+                        <button onclick="app.openAccModal()" class="btn btn-primary admin-only">新增收支</button>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:60px; text-align:center;">燈號</th>
+                                    <th>日期</th>
+                                    <th>項目名稱</th>
+                                    <th style="text-align:right">金額</th>
+                                    <th class="hide-mobile">代墊人</th>
+                                    <th class="hide-mobile">回沖</th>
+                                    <th class="hide-mobile">還款</th>
+                                    <th style="text-align:center; width:80px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="acc-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section id="page-inventory" class="page-section">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                        <div style="display:flex; gap:10px; align-items:center;">
+                            <input type="text" id="search-inv" placeholder="搜尋產編..." oninput="app.renderInventory()" style="width:200px;">
+                        </div>
+                        <div style="display:flex; gap:10px;">
+                            <input type="file" id="excel-upload" accept=".xlsx, .xls" style="display: none;" onchange="app.previewExcel(event)">
+                            <button onclick="document.getElementById('excel-upload').click()" class="btn btn-secondary admin-only"><i class="ph ph-upload-simple"></i> 匯入</button>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:80px; text-align:center;">狀態</th>
+                                    <th class="hide-mobile" onclick="app.sortInventory('Property_ID')" style="cursor:pointer; width:150px;">產編 ⇅</th>
+                                    <th onclick="app.sortInventory('Name')" style="cursor:pointer;">財物名稱 ⇅</th>
+                                    <th class="hide-mobile" style="width:120px;">實驗區域</th>
+                                    <th class="hide-mobile" style="width:200px;">細項位置</th>
+                                    <th style="width:110px; text-align:center;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inv-tbody"></tbody>
+                        </table>
+                    </div>
+                </section>
             </div>
         </main>
 
-        <main id="page-accounting" class="page-section active">
-            
-            <div class="dashboard-grid">
-                <div class="dash-card">
-                    <h4>公積金總餘額 (Total Balance)</h4>
-                    <div class="dash-value" id="val-balance">---</div>
-                    <div style="display:flex; justify-content:space-around; font-size:0.9rem; color:#666; margin-top:8px; border-top:1px solid #eee; padding-top:8px;">
-                        <span>🏦 戶頭: <span id="val-bank" style="font-weight:bold; color:#212529;">---</span></span>
-                        <span>💵 現金: <span id="val-cash" style="font-weight:bold; color:#212529;">---</span></span>
-                    </div>
-                </div>
-                <div class="dash-card danger">
-                    <h4>待還代墊 (Payable)</h4>
-                    <div class="dash-value" id="val-payable">---</div>
-                    <small onclick="app.showDebtsDetail()" style="text-decoration:underline; cursor:pointer;">查看欠誰錢</small>
-                </div>
-                <div class="dash-card warning">
-                    <h4>等待回沖 (Receivable)</h4>
-                    <div class="dash-value" id="val-receivable">---</div>
-                    <small>學校流程中</small>
-                </div>
-            </div>
-
-            <div class="toolbar">
-                <div class="filters">
-                    <input type="text" id="search-acc" placeholder="搜尋項目..." oninput="app.renderAccounting()">
-                    <div class="status-filter-group">
-                        <button class="filter-chip active" onclick="app.setAccFilter('All')" data-acc-val="All">全部</button>
-                        <button class="filter-chip" onclick="app.setAccFilter('Debt')" data-acc-val="Debt">🔴 欠款中</button>
-                        <button class="filter-chip" onclick="app.setAccFilter('Wait')" data-acc-val="Wait">🟡 等回沖</button>
-                    </div>
-                </div>
-                <div class="actions">
-                    <button onclick="app.openAccModal()" class="btn btn-primary admin-only">💸 新增帳務</button>
-                </div>
-            </div>
-
-            <div class="table-container">
-                <table id="acc-table">
-                    <thead>
-                        <tr>
-                            <th width="40">狀態</th>
-                            <th width="90">日期</th>
-                            <th>項目說明</th>
-                            <th width="80" style="text-align:right">金額</th>
-                            <th width="80">代墊人</th>
-                            <th width="90">學校回沖</th>
-                            <th width="90">還款學生</th>
-                            <th width="40">操作</th>
-                        </tr>
-                    </thead>
-                    <tbody id="acc-tbody"></tbody>
-                </table>
-            </div>
-        </main>
-    </div>
-
-    <div id="bind-modal" class="modal hidden">
-        <div class="modal-content" style="max-width: 400px;">
-            <div class="modal-header">
-                <h3 style="margin: 0; color: var(--primary);">歡迎！請綁定實驗室帳號</h3>
-            </div>
-            <div class="modal-body">
-                <p style="font-size: 0.9rem; color: #666; margin-top: 0;">
-                    系統發現你是第一次使用 Google 登入。請輸入你的「學號」進行綁定，之後登入即可無縫使用。
-                </p>
-                <div class="form-group">
-                    <label>學號 (Student ID)</label>
-                    <input type="text" id="Bind_Input_ID" placeholder="例如: r129... 或 R129...">
-                </div>
-            </div>
-            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px;">
-                <button onclick="app.cancelBinding()" class="btn btn-secondary">先以訪客瀏覽</button>
-                <button id="btn-submit-bind" onclick="app.submitBinding()" class="btn btn-primary">確認綁定</button>
-            </div>
-        </div>
+        <nav class="mobile-nav">
+            <button class="mobile-nav-item active" onclick="app.switchTab('members')"><i class="ph ph-users"></i> <span>人員</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('instruments')"><i class="ph ph-microscope"></i> <span>儀器</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench"></i> <span>維修</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> <span>財務</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('inventory')"><i class="ph ph-barcode"></i> <span>產編</span></button>
+        </nav>
     </div>
 
     <div id="member-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="m-modal-title">編輯成員</h3>
-                <button onclick="app.closeModal('member-modal')" class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group"><label>學號 (Student_ID)</label><input type="text" id="Student_ID"></div>
-                <div class="form-row">
-                    <div class="form-group"><label>學位</label><select id="Degree"><option value="PhD">PhD (博班)</option><option value="Master">Master (碩班)</option><option value="Undergrad">Undergrad (專題生)</option><option value="Prof">Professor</option></select></div>
-                    <div class="form-group"><label>中文名</label><input type="text" id="Name_Ch"></div>
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header"><h3 id="m-modal-title">新增成員</h3><span class="close" onclick="app.closeModal('member-modal')">&times;</span></div>
+            <div class="modal-body" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px;">
+                <div class="form-group"><label>學號 (唯一 ID)</label><input type="text" id="Student_ID" placeholder="例如：R12943xxx"></div>
+                <div class="form-group"><label>中文姓名</label><input type="text" id="Name_Ch"></div>
+                
+                <div class="form-group"><label>英文姓氏 (Surname)</label><input type="text" id="Surname_En"></div>
+                <div class="form-group"><label>英文名字 (First Name)</label><input type="text" id="Name_En"></div>
+                
+                <div class="form-group"><label>系所 (Department)</label><input type="text" id="Department"></div>
+                <div class="form-group"><label>學位 (Degree)</label>
+                    <select id="Degree"><option value="Master">碩士</option><option value="PhD">博士</option><option value="Undergrad">大學部</option></select>
                 </div>
-                <div class="form-row">
-                    <div class="form-group"><label>英文名</label><input type="text" id="Name_En"></div>
-                    <div class="form-group"><label>英文姓</label><input type="text" id="Surname_En"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>系所</label>
-                        <select id="Department">
-                            <option value="電子所">電子所</option>
-                            <option value="光電所">光電所</option>
-                            <option value="重點科技學院">重點科技學院</option>
-                        </select>
+                
+                <div class="form-group"><label>入學年月</label><input type="date" id="Enrollment_Date"></div>
+                <div class="form-group"><label>離校年月</label><input type="date" id="Leave_Date"></div>
+                
+                <div class="form-group"><label>手機號碼</label><input type="text" id="Phone"></div>
+                <div class="form-group"><label>電子信箱</label><input type="text" id="Email"></div>
+                
+                <div class="form-group"><label>角色權限</label><select id="Role"><option value="User">一般成員</option><option value="Admin">管理員</option></select></div>
+                
+                <div class="form-group">
+                    <label>目前狀態</label>
+                    <input type="hidden" id="Status">
+                    <div class="filter-group">
+                        <button type="button" class="btn-filter filter-chip" id="btn-status-active" onclick="app.setMemberStatus('Active')" style="flex:1;">在校</button>
+                        <button type="button" class="btn-filter filter-chip" id="btn-status-alumni" onclick="app.setMemberStatus('Alumni')" style="flex:1;">畢業</button>
                     </div>
-                    <div class="form-group"><label>狀態</label><select id="Status"><option value="Active">Active (在學)</option><option value="Alumni">Alumni (畢業)</option></select></div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group"><label>入學日</label><input type="date" id="Enrollment_Date"></div>
-                    <div class="form-group"><label>離校日</label><input type="date" id="Leave_Date"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>電話</label><input type="text" id="Phone"></div>
-                    <div class="form-group"><label>Email</label><input type="text" id="Email"></div>
-                </div>
-                <div class="form-group"><label>權限</label><select id="Role"><option value="User">User</option><option value="Admin">Admin</option></select></div>
-                <div class="form-group" style="margin-top: 10px; border-top: 1px dashed #ccc; padding-top: 10px;">
-                    <label>Google 帳號綁定狀態</label>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="text" id="Bind_Status" disabled style="background-color: #e9ecef; flex: 1;">
-                        <button type="button" id="btn-unbind" onclick="app.unbindMember()" class="btn btn-sm btn-danger hidden">解除</button>
+                
+                <div class="form-group" style="grid-column: 1 / -1;"><label>Google 綁定狀態</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" id="Bind_Status" disabled style="background: var(--bg-page); color: var(--text-muted); font-weight: bold;">
+                        <button id="btn-unbind" class="btn btn-danger hidden" onclick="app.unbindMember()"><i class="ph ph-link-break"></i> 解除綁定</button>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer" style="display: flex; justify-content: space-between;">
-                <button onclick="app.deleteRecord('members', document.getElementById('Student_ID').value, 'member-modal')" class="btn btn-danger hidden" id="btn-del-m">刪除</button>
+            <div class="modal-footer">
+                <button onclick="app.deleteRecord('members', document.getElementById('Student_ID').value, 'member-modal')" class="btn btn-danger hidden" id="btn-del-m" style="margin-right: auto;">刪除人員</button>
+                <button onclick="app.closeModal('member-modal')" class="btn btn-secondary">取消</button>
                 <button onclick="app.saveMember()" class="btn btn-primary" id="btn-save-m">儲存</button>
             </div>
         </div>
     </div>
 
     <div id="inst-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="i-modal-title">編輯儀器</h3>
-                <button onclick="app.closeModal('inst-modal')" class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="Instrument_ID">
-                <div class="form-row">
+        <div class="modal-content" style="max-width: 850px;">
+            <div class="modal-header"><h3 id="i-modal-title">新增儀器</h3><span class="close" onclick="app.closeModal('inst-modal')">&times;</span></div>
+            <div class="modal-body modal-grid-layout">
+                <div class="inst-form-left">
+                    <input type="hidden" id="Instrument_ID">
                     <div class="form-group">
-                        <label>儀器名稱 (Name)</label>
-                        <input type="text" id="Name">
+                        <label>運作狀態</label>
+                        <input type="hidden" id="Is_Active" value="TRUE">
+                        <div class="filter-group">
+                            <button type="button" class="btn-filter filter-chip active" id="btn-inst-active-true" onclick="app.setInstActive(true)" style="flex:1;">正常運作</button>
+                            <button type="button" class="btn-filter filter-chip" id="btn-inst-active-false" onclick="app.setInstActive(false)" style="flex:1;">報廢停用</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>財產編號 (Property_ID)</label>
-                        <input type="text" id="Property_ID">
-                    </div>
+                    <div class="form-group"><label>儀器名稱</label><input type="text" id="Name"></div>
+                    <div class="form-group"><label>實驗區域</label><select id="Location"></select></div>
+                    <div class="form-group"><label>負責人</label><select id="Manager_ID"></select></div>
+                    <div class="form-group"><label>廠商資訊</label><input type="text" id="Vendor_Info"></div>
+                    <div class="form-group"><label>操作手冊連結</label><input type="text" id="Manual_Link" placeholder="https://..."></div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group"><label>區域 (Location)</label><select id="Location"><option value="">請選擇區域</option></select></div>
-                    <div class="form-group"><label>現況狀態 (Is_Active)</label><select id="Is_Active"><option value="TRUE">🟢 正常運作 (Active)</option><option value="FALSE">🔴 停用/報廢 (Inactive)</option></select></div>
+                <div class="inst-tags-right">
+                    <label style="display:block; margin-bottom:10px; font-weight:600;"><i class="ph ph-tag"></i> 關聯財產編號</label>
+                    <div id="Modal_Linked_Tags" style="display:flex; flex-direction:column; gap:10px; min-height:100px;"></div>
                 </div>
-                <div class="form-group"><label>負責人 (Manager)</label><select id="Manager_ID"><option value="">(無)</option></select></div>
-                <div class="form-group"><label>廠商資訊 (Vendor_Info)</label><input type="text" id="Vendor_Info" placeholder="廠商名、聯絡電話..."></div>
-                <div class="form-group"><label>手冊連結 (Manual_Link)</label><input type="text" id="Manual_Link" placeholder="Google Drive Link..."></div>
             </div>
-            <div class="modal-footer" style="display: flex; justify-content: space-between;">
-                <button onclick="app.deleteRecord('instruments', document.getElementById('Instrument_ID').value, 'inst-modal')" class="btn btn-danger hidden" id="btn-del-i">刪除</button>
+            <div class="modal-footer">
+                <button onclick="app.deleteRecord('instruments', document.getElementById('Instrument_ID').value, 'inst-modal')" class="btn btn-danger hidden" id="btn-del-i" style="margin-right: auto;">刪除儀器</button>
+                <button onclick="app.closeModal('inst-modal')" class="btn btn-secondary">取消</button>
                 <button onclick="app.saveInstrument()" class="btn btn-primary" id="btn-save-i">儲存</button>
             </div>
         </div>
     </div>
 
     <div id="log-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="l-modal-title">回報問題</h3>
-                <button onclick="app.closeModal('log-modal')" class="close-btn">&times;</button>
-            </div>
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header"><h3 id="l-modal-title">設備維修回報</h3><span class="close" onclick="app.closeModal('log-modal')">&times;</span></div>
             <div class="modal-body">
                 <input type="hidden" id="Log_ID">
-                <div class="form-row">
-                    <div class="form-group"><label>狀態 (Status)</label><select id="Log_Status"><option value="Open">🔴 未解決 (Open)</option><option value="Closed">🟢 已解決 (Closed)</option></select></div>
-                    <div class="form-group"><label>緊急程度 (Urgency)</label><select id="Urgency"><option value="5">🔥🔥🔥🔥🔥 (5) 嚴重</option><option value="4">🔥🔥🔥🔥 (4) 高</option><option value="3" selected>🔥🔥🔥 (3) 中</option><option value="2">🔥🔥 (2) 低</option><option value="1">🔥 (1) 輕微</option></select></div>
+                
+                <div class="form-group">
+                    <label>處理狀態</label>
+                    <input type="hidden" id="Log_Status">
+                    <div class="filter-group">
+                        <button type="button" class="btn-filter filter-chip" id="btn-log-open" onclick="app.setLogFormStatus('Open')" style="flex:1;">待處理</button>
+                        <button type="button" class="btn-filter filter-chip" id="btn-log-closed" onclick="app.setLogFormStatus('Closed')" style="flex:1;">已結案</button>
+                    </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group"><label>發生日期 (Reported)</label><input type="date" id="Date_Reported"></div>
-                    <div class="form-group"><label>解決日期 (Resolved)</label><input type="date" id="Date_Resolved"></div>
+
+                <div class="form-group">
+                    <label>緊急程度 (點擊火焰)</label>
+                    <input type="hidden" id="Urgency">
+                    <div id="urgency-rating" style="display: flex; gap: 6px; font-size: 1.8rem; cursor: pointer;">
+                        <i class="ph-fill ph-fire" onclick="app.setUrgency(1)"></i>
+                        <i class="ph-fill ph-fire" onclick="app.setUrgency(2)"></i>
+                        <i class="ph-fill ph-fire" onclick="app.setUrgency(3)"></i>
+                        <i class="ph-fill ph-fire" onclick="app.setUrgency(4)"></i>
+                        <i class="ph-fill ph-fire" onclick="app.setUrgency(5)"></i>
+                    </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group"><label>地點 (Location) *篩選用</label><select id="Log_Location_Filter" onchange="app.filterLogInstruments()"><option value="">請選擇...</option></select></div>
-                    <div class="form-group"><label>儀器 (Instrument)</label><select id="Log_Instrument_ID"><option value="">請先選擇地點</option></select></div>
-                </div>
-                <div class="form-group"><label>問題描述 (Problem)</label><textarea id="Problem_Desc" rows="3" placeholder="請詳細描述狀況..."></textarea></div>
-                <div class="form-group"><label>解決方案 (Solution)</label><textarea id="Solution" rows="2" placeholder="維修過程、更換零件... (未解決可留空)"></textarea></div>
-                <div class="form-group"><label>負責人 (Manager)</label><select id="Owner_ID"><option value="">(選擇成員)</option></select></div>
+
+                <div class="form-group"><label>回報日期</label><input type="date" id="Date_Reported"></div>
+                <div class="form-group"><label>回報人</label><select id="Owner_ID"></select></div>
+                <div class="form-group"><label>實驗區域 (幫助過濾儀器)</label><select id="Log_Location_Filter" onchange="app.filterLogInstruments()"></select></div>
+                <div class="form-group"><label>發生故障儀器</label><select id="Log_Instrument_ID"></select></div>
+                <div class="form-group"><label>問題詳細描述</label><textarea id="Problem_Desc" rows="3"></textarea></div>
+                <div class="form-group"><label>結案解決方案</label><textarea id="Solution" rows="2"></textarea></div>
+                <div class="form-group"><label>結案日期</label><input type="date" id="Date_Resolved"></div>
             </div>
-            <div class="modal-footer" style="display: flex; justify-content: space-between;">
-                <button onclick="app.deleteRecord('logs', document.getElementById('Log_ID').value, 'log-modal')" class="btn btn-danger hidden" id="btn-del-l">刪除</button>
-                <button onclick="app.saveLog()" class="btn btn-primary" id="btn-save-l">儲存</button>
+            <div class="modal-footer">
+                <button onclick="app.deleteRecord('logs', document.getElementById('Log_ID').value, 'log-modal')" class="btn btn-danger hidden" id="btn-del-l" style="margin-right: auto;">刪除</button>
+                <button onclick="app.closeModal('log-modal')" class="btn btn-secondary">取消</button>
+                <button onclick="app.saveLog()" class="btn btn-primary" id="btn-save-l">送出</button>
             </div>
         </div>
     </div>
 
     <div id="acc-modal" class="modal hidden">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="a-modal-title">記帳</h3>
-                <button onclick="app.closeModal('acc-modal')" class="close-btn">&times;</button>
-            </div>
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header"><h3 id="a-modal-title">新增收支項目</h3><span class="close" onclick="app.closeModal('acc-modal')">&times;</span></div>
             <div class="modal-body">
                 <input type="hidden" id="Txn_ID">
+                <div class="form-group"><label>日期</label><input type="date" id="Acc_Date"></div>
+                <div class="form-group"><label>類型</label><select id="Acc_Type" onchange="app.handleAccTypeChange()"><option value="School">報帳 (School)</option><option value="Lab">內帳 (Lab)</option><option value="Income">老師匯入 (Income)</option><option value="Withdraw">提款 (Withdraw)</option></select></div>
+                <div class="form-group"><label>項目名稱</label><input type="text" id="Acc_Description"></div>
+                <div class="form-group"><label>金額</label><input type="number" id="Acc_Amount"></div>
+                <div class="form-group"><label>代墊人</label><select id="Acc_Payer" onchange="app.handleAccPayerChange()"></select></div>
                 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>類型 (Type)</label>
-                        <select id="Acc_Type" onchange="app.handleAccTypeChange()">
-                            <option value="School">🏫 學校報帳 (會回沖)</option>
-                            <option value="Lab">🧪 實驗室內帳 (不回沖)</option>
-                            <option value="Deposit">💰 匯入公積金 (老師給錢)</option>
-                            <option value="Withdrawal">🏧 銀行提款 (轉為現金)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>日期 (Date)</label>
-                        <input type="date" id="Acc_Date">
+                <div class="form-group" id="grp-fund-source" style="display:none; align-items:center; gap:10px;">
+                    <label style="margin:0;">扣款來源</label>
+                    <input type="hidden" id="Fund_Source" value="Bank">
+                    <div class="filter-group">
+                        <button type="button" class="btn-filter filter-chip active" id="btn-fs-bank" onclick="app.setFundSource('Bank')">戶頭</button>
+                        <button type="button" class="btn-filter filter-chip" id="btn-fs-cash" onclick="app.setFundSource('Cash')">現金</button>
                     </div>
                 </div>
 
-                <div class="form-row" style="display: grid; grid-template-columns: 2fr 1fr;">
-                    <div class="form-group">
-                        <label>項目說明 (Description)</label>
-                        <input type="text" id="Acc_Description" placeholder="ex: 購買光學桌螺絲">
-                    </div>
-                    <div class="form-group">
-                        <label>金額 (Amount)</label>
-                        <input type="number" id="Acc_Amount" placeholder="ex: 500">
-                    </div>
+                <div class="form-group" id="grp-recharge"><label>回沖日期 (若學校已入帳)</label><input type="date" id="Recharge_Date"></div>
+                <div class="form-group" id="grp-payback"><label>還款日期 (若已還學生)</label><input type="date" id="Payback_Date"></div>
+                <div class="form-group"><label>發票/單據雲端連結</label><input type="text" id="Invoice_Link" placeholder="https://..."></div>
+                <div class="form-group"><label>備註</label><textarea id="Acc_Remark" rows="2"></textarea></div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.deleteRecord('accounting', document.getElementById('Txn_ID').value, 'acc-modal')" class="btn btn-danger hidden" id="btn-del-a" style="margin-right: auto;">刪除</button>
+                <button onclick="app.closeModal('acc-modal')" class="btn btn-secondary">取消</button>
+                <button onclick="app.saveAccounting()" class="btn btn-primary" id="btn-save-a">儲存</button>
+            </div>
+        </div>
+    </div>
+    <div id="inv-loc-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>編輯實驗區域</h3>
+                <span class="close" onclick="app.closeModal('inv-loc-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="Loc_Prop_ID">
+                <div class="form-group">
+                    <label>選擇區域</label>
+                    <select id="Loc_Select_Value">
+                        <option value="多腔體區">多腔體區</option>
+                        <option value="機房">機房</option>
+                        <option value="製程區">製程區</option>
+                        <option value="黃光室">黃光室</option>
+                        <option value="量測區">量測區</option>
+                        <option value="辦公區">辦公區</option>
+                        <option value="頂樓">頂樓</option>
+                        <option value="其他">其他</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.closeModal('inv-loc-modal')" class="btn btn-secondary">取消</button>
+                <button onclick="app.saveInvLocation()" class="btn btn-primary">確認儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="remark-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 450px;">
+            <div class="modal-header">
+                <h3>編輯細項位置備註</h3>
+                <span class="close" onclick="app.closeModal('remark-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="Remark_Prop_ID">
+                <div class="form-group">
+                    <label>具體存放位置說明</label>
+                    <textarea id="Remark_Text" rows="3" placeholder="例如：手套箱右側第三個層架..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.closeModal('remark-modal')" class="btn btn-secondary">取消</button>
+                <button onclick="app.saveInvRemark()" class="btn btn-primary">確認儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="inv-details-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3><i class="ph ph-info"></i> 財產詳細資訊</h3>
+                <span class="close" onclick="app.closeModal('inv-details-modal')">&times;</span>
+            </div>
+            <div class="modal-body" style="padding: 10px 20px;">
+                <table style="width: 100%; border-collapse: collapse; line-height: 1.8; text-align: left; table-layout: fixed;">
+                    <tbody id="inv-details-tbody" style="font-size: 0.95rem;">
+                        </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.closeModal('inv-details-modal')" class="btn btn-secondary">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="link-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3>產編關聯作業</h3>
+                <span class="close" onclick="app.closeModal('link-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="Link_Prop_ID">
+                <input type="hidden" id="Link_Mode_Selected" value="existing">
+                
+                <div style="background: var(--bg-page); padding: 12px; border-radius: 6px; margin-bottom: 16px;">
+                    <div style="font-weight: 600;" id="Link_Prop_Name">財物名稱</div>
+                    <div style="font-size: 0.85rem; color: var(--text-muted); font-family: monospace;" id="Link_Prop_Code">編號</div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>先付錢的人 (Payer)</label>
-                        <select id="Acc_Payer" onchange="app.handleAccPayerChange()"></select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <div id="grp-fund-source" style="display:none; flex-direction: column; gap: 5px;">
-                            <label>扣款來源 (Source)</label>
-                            <div class="status-filter-group" style="margin-top: 0; padding: 2px; height: 38px; display: flex;">
-                                <button type="button" class="filter-chip active" id="btn-fs-bank" onclick="app.setFundSource('Bank')" style="flex:1; padding:4px;">🏦 戶頭</button>
-                                <button type="button" class="filter-chip" id="btn-fs-cash" onclick="app.setFundSource('Cash')" style="flex:1; padding:4px;">💵 現金</button>
-                                <input type="hidden" id="Fund_Source" value="Bank">
-                            </div>
-                        </div>
-                        
-                        <div id="grp-payback" style="display:none; flex-direction: column; gap: 5px;">
-                            <label>還款給代墊人日期</label>
-                            <input type="date" id="Payback_Date" style="height: 38px; box-sizing: border-box;">
-                            <small style="color:#888; margin-top: -3px;">空白=欠款中</small>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="form-row">
-                    <div class="form-group" id="grp-recharge" style="display: flex; flex-direction: column;">
-                        <label>學校回沖日期</label>
-                        <input type="date" id="Recharge_Date" style="height: 38px; box-sizing: border-box;">
-                        <small style="color:#888; margin-top: 3px;">空白=等待回沖</small>
-                    </div>
-                    <div class="form-group">
-                        <label>發票/收據連結 (選填)</label>
-                        <input type="text" id="Invoice_Link" placeholder="Google Drive 連結..." style="height: 38px; box-sizing: border-box;">
+                <div class="form-group">
+                    <label>關聯模式</label>
+                    <div class="filter-group">
+                        <button type="button" class="btn-filter filter-chip active" id="mode-btn-existing" onclick="app.selectLinkMode('existing')" style="flex:1;">連結現有儀器</button>
+                        <button type="button" class="btn-filter filter-chip" id="mode-btn-new" onclick="app.selectLinkMode('new')" style="flex:1;">建立新機台</button>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label>備註 (Remark)</label>
-                    <textarea id="Acc_Remark" rows="2" placeholder="例如：口試委員點心費..."></textarea>
+                    <label>實驗區域 (必選)</label>
+                    <select id="Link_Location" onchange="app.onLinkLocationChange()">
+                        <option value="">請選擇區域...</option>
+                        <option value="多腔體區">多腔體區</option>
+                        <option value="機房">機房</option>
+                        <option value="製程區">製程區</option>
+                        <option value="黃光室">黃光室</option>
+                        <option value="量測區">量測區</option>
+                        <option value="辦公區">辦公區</option>
+                        <option value="頂樓">頂樓</option>
+                        <option value="其他">其他</option>
+                    </select>
                 </div>
 
+                <div id="link-existing-section" class="form-group">
+                    <label>選擇目標儀器</label>
+                    <select id="Link_Select_Inst">
+                        <option value="">請先選擇上方區域...</option>
+                    </select>
+                </div>
+
+                <div id="link-new-section" class="form-group hidden">
+                    <label>確認新儀器名稱</label>
+                    <input type="text" id="Link_New_Name">
+                </div>
             </div>
-            
-            <div class="modal-footer" style="display: flex; justify-content: space-between;">
-                <button onclick="app.deleteRecord('accounting', document.getElementById('Txn_ID').value, 'acc-modal')" class="btn btn-danger hidden" id="btn-del-a">刪除</button>
-                <button onclick="app.saveAccounting()" class="btn btn-primary" id="btn-save-a">儲存</button>
+            <div class="modal-footer">
+                <button onclick="app.closeModal('link-modal')" class="btn btn-secondary">取消</button>
+                <button onclick="app.submitLinkInst()" class="btn btn-primary" id="btn-link-existing">確認連結</button>
+                <button onclick="app.submitLinkInst()" class="btn btn-primary hidden" id="btn-link-new">建立並繼續</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="import-preview-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 800px;">
+            <div class="modal-header">
+                <h3>確認匯入資料 (預覽)</h3>
+                <span class="close" onclick="app.closeModal('import-preview-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom:10px; color:var(--text-muted);">共抓取到 <strong id="preview-count" style="color:var(--primary);">0</strong> 筆設備。</p>
+                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                    <table>
+                        <thead style="position:sticky; top:0; z-index:1; background: #f8fafc;">
+                            <tr><th>組合編號</th><th>財物名稱</th><th>廠牌 / 型式</th><th>系統動作</th></tr>
+                        </thead>
+                        <tbody id="import-preview-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="app.closeModal('import-preview-modal')" class="btn btn-secondary">取消匯入</button>
+                <button onclick="app.confirmImport()" class="btn btn-primary" id="btn-confirm-import">確認並寫入系統</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="help-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>頁面說明與操作指南</h3>
+                <span class="close" onclick="app.closeModal('help-modal')">&times;</span>
+            </div>
+            <div class="modal-body" id="help-modal-body" style="padding: 20px; line-height: 1.6;"></div>
+            <div class="modal-footer">
+                <button onclick="app.closeModal('help-modal')" class="btn btn-primary">了解</button>
             </div>
         </div>
     </div>

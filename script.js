@@ -1,8 +1,9 @@
 // === script.js 最上方 ===
 // 1. 引入 Firebase 模組
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, writeBatch, arrayUnion } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+import { UI } from "./shared.js";
 // 2. 填入你的專屬金鑰
 const firebaseConfig = {
   apiKey: "AIzaSyBdgqZaW2jdJHTbKplPur2R6JxDyjb02PU",
@@ -23,15 +24,33 @@ const provider = new GoogleAuthProvider();
 
 // 4. 原本的 app 結構
 const app = {
-    data: {
-        members: [],
-        instruments: [],
-        logs: [],
-        accounting: []
+    data: { members: [], instruments: [], logs: [], accounting: [], inventory: [] },
+    invSortState: { key: 'Property_ID', direction: 'asc' },
+    tempLinkedPropId: null,
+    currentEditingInstTags: [],
+    // ★ 新增：用來暫存預覽的匯入資料
+    tempImportPayloads: [],
+    // === 統一資料庫 ID 生成邏輯 (YYYYMMDDHHMMSS_隨機數) ===
+    generateId: function(prefix) {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        const rand = Math.floor(Math.random() * 900) + 100; // 加入 100~999 隨機數
+        return `${prefix}_${yyyy}${mm}${dd}${hh}${min}${ss}_${rand}`;
     },
-    sortState: { key: 'Location', direction: 'asc' },
+
+    closeModal: function(modalId) {
+        UI.closeModal(modalId);
+    },
+    sortState: { key: 'Location', direction: 'asc' }, // 儀器用的
+    logSortState: { key: 'Date_Reported', direction: 'desc' }, // ★ 新增：維修紀錄用的
     logFilterStatus: 'Open',
     accFilterStatus: 'All',
+    invFilterStatus: 'All',
 
     init: function() {
         this.setupRealtimeListeners(); // ★ 改成呼叫這個新的監聽器
@@ -62,6 +81,90 @@ const app = {
         } catch (error) {
             this.showNotification("登出失敗", 'error');
         }
+    },
+
+    // ================= 頁面說明文案庫 (SOP) =================
+    helpDocs: {
+        'members': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">人員管理與權限控制</h3>
+            <p style="margin-bottom: 10px;">本模組負責管理實驗室成員資料、帳號綁定與系統操作權限。</p>
+            <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
+                <li><strong>帳號綁定流程：</strong>新生需先由 Admin 於此處建立「學號」。新生使用 Google 帳號登入系統後，輸入該學號即可完成系統綁定。</li>
+                <li><strong>資料不可變性：</strong>學號 (Student_ID) 為系統底層之唯一識別碼，建立存檔後即無法變更。</li>
+                <li><strong>權限層級說明：</strong>
+                    <ul>
+                        <li><span style="color: var(--primary); font-weight: 600;">Admin：</span>具備全站最高權限，可進行資料增刪查改、產編匯入與公積金管理。</li>
+                        <li><span style="color: var(--text-main); font-weight: 600;">User：</span>具備一般檢視權限，僅能回報維修紀錄及瀏覽公開資訊。</li>
+                    </ul>
+                </li>
+            </ul>`,
+        
+        'instruments': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">儀器設備與資產管理</h3>
+            <p style="margin-bottom: 10px;">本模組為實驗室硬體資產之核心資料庫，負責追蹤機台狀態與歷史履歷。</p>
+            <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
+                <li><strong>跨系統關聯 (產編綁定)：</strong>編輯儀器時，右側可檢視並管理關聯之「學校財產編號」。一項儀器可包含多個產編（多對一架構）。</li>
+                <li><strong>資料獨立性：</strong>解除產編綁定或刪除儀器時，產編原本的「物理位置 (實驗區域)」將被保留，不會被強制清空。</li>
+                <li><strong>維修履歷整合：</strong>於列表中直接點擊任意儀器列，下方將即時展開該機台之歷史維修清單。</li>
+            </ul>`,
+        
+        'logs': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">維修紀錄與除錯知識庫</h3>
+            <p style="margin-bottom: 10px;">追蹤設備異常與維護進度，並作為未來交接之技術參考指南。</p>
+            <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
+                <li><strong>報修標準作業：</strong>新增紀錄時，請先選擇「實驗區域」，系統將自動過濾出該區域之設備供您選擇。</li>
+                <li><strong>狀態與緊急度：</strong>緊急度以 1 (最低) 至 5 (最高) 標示；Admin 可直接點擊列表左側之圖示，快速將案件切換為「已結案 (Closed)」。</li>
+                <li><strong>知識庫建立：</strong>結案時請詳實填寫「解決方案」，以便未來發生相同異常時可快速檢索處置方式。</li>
+            </ul>`,
+        
+        'accounting': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">公積金與帳務系統</h3>
+            <p style="margin-bottom: 10px;">監控銀行帳戶餘額、實驗室現金水位與代墊款項核銷進度。</p>
+            <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
+                <li><strong>帳務燈號警示：</strong>
+                    <ul>
+                        <li><span style="color: var(--danger); font-weight: 600;">紅燈 (待還款)：</span>成員代墊款項，實驗室尚未以現金或匯款償還。</li>
+                        <li><span style="color: var(--warning); font-weight: 600;">黃燈 (待回沖)：</span>已送出報帳程序，等待學校經費撥入銀行帳戶。</li>
+                    </ul>
+                </li>
+                <li><strong>自動化防呆：</strong>輸入金額時一律填寫「正數」。系統將依據交易類型 (如：報帳、提款) 自動判斷並計算正負值。</li>
+            </ul>`,
+        
+        'inventory': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">財產編號清點系統</h3>
+            <p style="margin-bottom: 10px;">學校年度財產盤點與實驗室資產定位的自動化處理中心。</p>
+            <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
+                <li><strong>匯入 Excel 規範與必要欄位：</strong>
+                    <br>請直接上傳學校提供之 Excel 原檔。系統會自動略過前 6 行表頭，請務必確認第 7 行包含以下精確標題字眼：
+                    <ul style="list-style-type: circle; margin-top: 4px; margin-bottom: 8px; color: var(--text-muted);">
+                        <li><strong>財物編號、校號、附件：</strong>此三欄系統會自動結合成「唯一識別碼」(如 31011-00-00)。</li>
+                        <li><strong>財物名稱、廠牌、型式(或形式)、單價、取得日期、年限：</strong>這些硬體規格將被系統抓取建檔。</li>
+                    </ul>
+                </li>
+                <li><strong>實體位置維護與保留：</strong>
+                    <br>產編具備獨立的「實驗區域」與「細項位置（備註）」。每次匯入新年度 Excel 時，<span style="color: var(--success); font-weight: bold;">系統會自動保留您過往建置的區域與備註資料</span>，絕不會被學校的原檔覆蓋，請安心匯入。
+                </li>
+                <li><strong>儀器綁定操作：</strong>
+                    <ul>
+                        <li><span style="color: var(--primary); font-weight: 600;">藍色按鈕：</span>尚未綁定。點擊可將產編歸屬至現有儀器或建立為新機台。</li>
+                        <li><span style="color: var(--danger); font-weight: 600;">紅色按鈕：</span>已綁定。點擊可解除關聯，解除後不會影響該產編的實體位置紀錄。</li>
+                    </ul>
+                </li>
+            </ul>`
+    },
+
+    openHelpModal: function() {
+        // 抓取目前 active 的 page id，例如 'page-members' -> 'members'
+        const activePage = document.querySelector('.page-section.active');
+        if (!activePage) return;
+        
+        const tabName = activePage.id.replace('page-', '');
+        const content = this.helpDocs[tabName] || "<p>目前頁面暫無說明。</p>";
+        
+        document.getElementById('help-modal-body').innerHTML = content;
+        
+        // 這裡因為沒有填寫表單的需求，直接把 hidden 拿掉即可
+        document.getElementById('help-modal').classList.remove('hidden');
     },
 
     // === 監聽登入狀態 ===
@@ -172,15 +275,15 @@ const app = {
             el.disabled = !isAdmin; 
         });
 
-        // 2. 導覽列的「公積金」按鈕變灰 Disabled
+        // 2. 導覽列的限制按鈕變灰 Disabled
         const accNavBtn = document.getElementById('nav-accounting');
-        if (accNavBtn) {
-            accNavBtn.disabled = !isAdmin;
-        }
+        const invNavBtn = document.getElementById('nav-inventory');
+        if (accNavBtn) accNavBtn.disabled = !isAdmin;
+        if (invNavBtn) invNavBtn.disabled = !isAdmin;
 
-        // 3. 防呆：如果權限不足卻在公積金頁面，自動切換回人員頁面
+        // 防呆：如果權限不足卻在 Admin 專屬頁面，自動切換回人員頁面
         const currentPage = document.querySelector('.page-section.active');
-        if (currentPage && currentPage.id === 'page-accounting' && !isAdmin) {
+        if (currentPage && (currentPage.id === 'page-accounting' || currentPage.id === 'page-inventory') && !isAdmin) {
             this.switchTab('members'); 
         }
 
@@ -194,11 +297,22 @@ const app = {
     // ================= 共用刪除邏輯 =================
     deleteRecord: async function(collectionName, id, modalId) {
         if(!confirm("⚠️ 確定要永久刪除這筆資料嗎？刪除後無法復原！")) return;
+        
+        const btn = document.getElementById(`btn-del-${modalId.charAt(0)}`);
+        if (btn) { btn.innerText = "刪除中..."; btn.disabled = true; }
+
         try {
+            // 執行資料刪除
+            // (註：因綁定陣列存在於儀器文件中，刪除儀器即自動解除與產編之關聯，
+            // 且不會更動產編原本的「實驗區域」與「細項位置」紀錄)
             await deleteDoc(doc(db, collectionName, id));
+            
             this.closeModal(modalId);
+            this.showNotification("刪除成功", 'success');
         } catch (e) {
             this.showNotification("❌ 刪除失敗: " + e.message, 'error');
+        } finally {
+            if (btn) { btn.innerText = "刪除"; btn.disabled = false; }
         }
     },
 
@@ -220,11 +334,11 @@ const app = {
     // ================= Firebase 即時連線 =================
     setupRealtimeListeners: function() {
         // 設定 Loading 畫面
-        ['member-grid', 'inst-tbody', 'log-tbody', 'acc-tbody'].forEach(id => {
+        ['member-tbody', 'inst-tbody', 'log-tbody', 'acc-tbody'].forEach(id => {
             const el = document.getElementById(id);
             if(el) {
-                const cols = id === 'inst-tbody' ? 6 : id === 'log-tbody' ? 8 : id === 'acc-tbody' ? 8 : 1;
-                el.innerHTML = id === 'member-grid' ? '<div class="loading">與 Firebase 連線中...</div>' : `<tr><td colspan="${cols}" class="loading">與 Firebase 連線中...</td></tr>`;
+                const cols = id === 'inst-tbody' ? 6 : id === 'log-tbody' ? 8 : id === 'acc-tbody' ? 8 : (id === 'member-tbody' ? 6 : 1);
+                el.innerHTML = `<tr><td colspan="${cols}" class="loading" style="text-align:center; padding:20px;">與 Firebase 連線中...</td></tr>`;
             }
         });
 
@@ -254,20 +368,58 @@ const app = {
             this.data.logs = snapshot.docs.map(doc => doc.data());
             this.renderLogs();
         });
+
+        // 5. 即時監聽產編清點 (Inventory)
+        onSnapshot(collection(db, "inventory"), (snapshot) => {
+            this.data.inventory = snapshot.docs.map(doc => doc.data());
+            this.renderInventory();
+        });
     },
 
-    switchTab: function(tabName) {
-        document.querySelectorAll('.page-section').forEach(el => el.classList.add('hidden'));
-        document.querySelectorAll('.page-section').forEach(el => el.classList.remove('active'));
-        document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    // === 頁面與側邊欄切換邏輯 (SaaS 新版) ===
+    switchTab: function(tabId) {
+        // 1. 切換主內容區的顯示 (隱藏所有，顯示目標)
+        document.querySelectorAll('.page-section').forEach(s => {
+            s.classList.remove('active');
+        });
+        const targetPage = document.getElementById('page-' + tabId);
+        if (targetPage) {
+            targetPage.classList.add('active');
+        }
 
-        const target = document.getElementById(`page-${tabName}`);
-        if(target) { target.classList.remove('hidden'); target.classList.add('active'); }
-        
-        // 對應按鈕 Index: members=0, instruments=1, logs=2, accounting=3
-        const map = { 'members': 0, 'instruments': 1, 'logs': 2, 'accounting': 3 };
-        const btns = document.querySelectorAll('.nav-btn');
-        if(btns[map[tabName]]) btns[map[tabName]].classList.add('active');
+        // 2. 更新電腦版「側邊欄」的發亮狀態
+        document.querySelectorAll('.nav-item').forEach(btn => {
+            // 利用 onclick 屬性來判斷按鈕歸屬，防呆不報錯
+            const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId);
+            btn.classList.toggle('active', isMatch);
+        });
+
+        // 3. 更新「手機版」底部導覽的發亮狀態
+        document.querySelectorAll('.mobile-nav-item').forEach(btn => {
+            const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId);
+            btn.classList.toggle('active', isMatch);
+        });
+
+        // 4. 更新頂部標題
+        const titleMap = {
+            'members': '人員管理',
+            'instruments': '儀器設備',
+            'logs': '維修紀錄',
+            'accounting': '公積金與報帳',
+            'inventory': '產編清點'
+        };
+        const titleEl = document.getElementById('current-page-title');
+        if (titleEl) {
+            titleEl.innerText = titleMap[tabId] || '實驗室管理';
+        }
+
+        // 5. 觸發對應頁面的資料渲染，確保畫面有東西
+        if (tabId === 'inventory' && typeof this.renderInventory === 'function') this.renderInventory();
+        if (tabId === 'instruments' && typeof this.renderInstruments === 'function') this.renderInstruments();
+        if (tabId === 'logs' && typeof this.renderLogs === 'function') this.renderLogs();
+        if (tabId === 'accounting' && typeof this.renderAccounting === 'function') this.renderAccounting();
+        // 如果你有 renderMembers，這裡也會安全呼叫
+        if (tabId === 'members' && typeof this.renderMembers === 'function') this.renderMembers();
     },
 
     // ================= 💰 公積金管理邏輯 (全新) =================
@@ -359,81 +511,69 @@ const app = {
 
     renderAccounting: function() {
         const tbody = document.getElementById('acc-tbody');
-        const term = document.getElementById('search-acc').value.toLowerCase();
+        if(!tbody) return;
+        const searchEl = document.getElementById('search-acc');
+        const term = searchEl ? searchEl.value.toLowerCase() : ''; // ★ 安全防呆
         const filter = this.accFilterStatus;
 
         let filtered = this.data.accounting.filter(acc => {
-            // 搜尋文字
             const payerName = this.getMemberName(acc.Payer);
             const text = (acc.Description + payerName + acc.Type).toLowerCase();
             if (!text.includes(term)) return false;
-
-            // 狀態篩選
-            const isDebt = (acc.Payer !== 'Fund' && !acc.Payback_Date); // 欠人錢
-            const isWait = (acc.Type === 'School' && !acc.Recharge_Date); // 等回沖
-
+            const isDebt = (acc.Payer !== 'Fund' && !acc.Payback_Date);
+            const isWait = (acc.Type === 'School' && !acc.Recharge_Date);
             if (filter === 'Debt') return isDebt;
             if (filter === 'Wait') return isWait;
             return true;
         });
 
-        // 排序：日期新到舊
         filtered.sort((a, b) => new Date(b.Date) - new Date(a.Date));
-
-        if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="empty">查無紀錄</td></tr>';
-            return;
-        }
+        if (filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="8" class="empty">查無紀錄</td></tr>'; return; }
 
         tbody.innerHTML = filtered.map(acc => {
             const payerName = this.getMemberName(acc.Payer);
             const amt = parseFloat(acc.Amount);
             const isFund = acc.Payer === 'Fund';
+            let statusIcon = '<i class="ph-fill ph-circle" style="color: var(--success); font-size:1.2rem;"></i>'; 
+            if (!isFund && !acc.Payback_Date) statusIcon = '<i class="ph-fill ph-circle" style="color: var(--danger); font-size:1.2rem;"></i>'; 
+            else if (acc.Type === 'School' && !acc.Recharge_Date) statusIcon = '<i class="ph-fill ph-circle" style="color: var(--warning); font-size:1.2rem;"></i>';
             
-            // 狀態燈號邏輯
-            let statusIcon = "🟢"; // 預設正常
-            if (!isFund && !acc.Payback_Date) statusIcon = "🔴"; // 欠學生錢 = 紅燈 (最緊急)
-            else if (acc.Type === 'School' && !acc.Recharge_Date) statusIcon = "🟡"; // 錢還在學校 = 黃燈 (次要)
-            
-            // 日期顯示 (有日期顯示日期，沒日期顯示狀態文字)
-            const dateRecharge = acc.Recharge_Date ? this.formatDateForInput(acc.Recharge_Date) : `<span class="date-empty">等待回沖</span>`;
-            const datePayback = isFund ? `<span class="date-empty">-</span>` : (acc.Payback_Date ? this.formatDateForInput(acc.Payback_Date) : `<span class="date-empty" style="color:#dc3545">尚未還款</span>`);
-            
-            // 特別處理內帳/Deposit的顯示
+            const dateRecharge = acc.Recharge_Date ? this.formatDateForInput(acc.Recharge_Date) : `<span class="date-empty">等待</span>`;
+            const datePayback = isFund ? `<span class="date-empty">-</span>` : (acc.Payback_Date ? this.formatDateForInput(acc.Payback_Date) : `<span style="color:#dc3545">未還款</span>`);
             const showRecharge = (acc.Type === 'Lab' || acc.Type === 'Deposit') ? '<span class="date-empty">-</span>' : dateRecharge;
 
+            // ★ 加上 hide-mobile 配合 HTML 的簡化，並加入 mobile-truncate
             return `
             <tr onclick="app.openAccModal('${acc.Txn_ID}')" style="cursor:pointer">
                 <td style="text-align:center; font-size:1.2rem;">${statusIcon}</td>
-                <td>${this.formatDateForInput(acc.Date)}</td>
-                <td>
-                    ${acc.Description} 
+                <td>${this.formatDateForInput(acc.Date).substring(5)}</td> <td>
+                    <div class="mobile-truncate" title="${acc.Description}">${acc.Description}</div>
                     <br><small style="color:#888">${this.getAccTypeName(acc.Type)}</small>
                 </td>
-                <td style="text-align:right" class="${amt >= 0 ? 'amount-pos' : 'amount-neg'}">${amt}</td>
-                <td>${payerName}</td>
-                <td>${showRecharge}</td>
-                <td>${datePayback}</td>
-                <td style="text-align:center;">
-                    <button onclick="event.stopPropagation(); app.openAccModal('${acc.Txn_ID}')" class="btn btn-sm btn-secondary">✏️</button>
-                </td>
+                <td style="text-align:right; font-weight:bold;" class="${amt >= 0 ? 'amount-pos' : 'amount-neg'}">${amt}</td>
+                <td class="hide-mobile">${payerName}</td>
+                <td class="hide-mobile">${showRecharge}</td>
+                <td class="hide-mobile">${datePayback}</td>
+                <td style="text-align:center;"><button class="btn btn-sm btn-secondary">✏️</button></td>
             </tr>`;
         }).join('');
     },
 
     // 輔助：取得中文類型
     getAccTypeName: function(type) {
-        if(type === 'School') return '🏫 報帳';
-        if(type === 'Lab') return '🧪 內帳';
-        if(type === 'Deposit') return '💰 匯入';
-        if(type === 'Withdrawal') return '🏧 提款'; // ★ 補上這行
+        if(type === 'School') return '<i class="ph ph-buildings"></i> 報帳';
+        if(type === 'Lab') return '<i class="ph ph-flask"></i> 內帳';
+        if(type === 'Deposit') return '<i class="ph ph-download-simple"></i> 匯入';
+        if(type === 'Withdrawal') return '<i class="ph ph-money"></i> 提款';
         return type;
     },
 
     // 輔助：取得成員名字 (或是 Fund)
     getMemberName: function(id) {
+        if (!id) return '';
         if (id === 'Fund') return '🏦 公積金';
-        const m = this.data.members.find(x => x.Student_ID === id);
+        // ★ 雙重比對：同時支援 Student_ID 或 Google_UID 尋找
+        const m = this.data.members.find(x => x.Student_ID === id || x.Google_UID === id);
         return m ? m.Name_Ch : id;
     },
 
@@ -444,20 +584,13 @@ const app = {
         const inputs = document.querySelectorAll('#acc-modal input, #acc-modal select, #acc-modal textarea');
         
         this.fillPayerSelect('Acc_Payer');
-        inputs.forEach(el => {
-            if(el.type === 'radio') {
-                el.checked = false; // radio 只取消勾選，不刪除 value
-            } else {
-                el.value = '';
-            }
-        });
+        inputs.forEach(el => el.value = '');
 
         if (id) {
             document.getElementById('a-modal-title').innerText = "編輯帳務";
-            btnDel.classList.remove('hidden');
+            if (btnDel) btnDel.classList.remove('hidden');
             const acc = this.data.accounting.find(x => x.Txn_ID === id);
             
-            // 回填資料
             document.getElementById('Txn_ID').value = acc.Txn_ID;
             document.getElementById('Acc_Type').value = acc.Type;
             document.getElementById('Acc_Date').value = this.formatDateForInput(acc.Date);
@@ -466,29 +599,19 @@ const app = {
             document.getElementById('Acc_Payer').value = acc.Payer;
             document.getElementById('Recharge_Date').value = this.formatDateForInput(acc.Recharge_Date);
             document.getElementById('Payback_Date').value = this.formatDateForInput(acc.Payback_Date);
-            document.getElementById('Invoice_Link').value = acc.Invoice_Link || '';
-            
-            // ★ 新增：回填備註
-            document.getElementById('Acc_Remark').value = acc.Remark || '';
-            const fs = acc.Fund_Source || 'Bank';
-            this.setFundSource(fs);
-
         } else {
             document.getElementById('a-modal-title').innerText = "新增帳務";
-            btnDel.classList.add('hidden');
+            if (btnDel) btnDel.classList.add('hidden');
             const now = new Date();
-            const timeCode = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0');
-            document.getElementById('Txn_ID').value = `ACC_${timeCode}`;
+            document.getElementById('Txn_ID').value = this.generateId('ACC');
             document.getElementById('Acc_Date').value = this.formatDateForInput(new Date());
             document.getElementById('Acc_Type').value = 'School';
             document.getElementById('Acc_Payer').value = 'Fund';
-            this.setFundSource('Bank');
         }
         
         this.handleAccTypeChange();
         this.handleAccPayerChange();
-
-        modal.classList.remove('hidden');
+        if (modal) modal.classList.remove('hidden');
     },
 
     // 控制扣款來源按鈕的 UI 與取值
@@ -502,7 +625,7 @@ const app = {
             if(source === 'Bank') btnBank.classList.add('active'); else btnBank.classList.remove('active');
         }
         if (btnCash) {
-            if(source === 'Cash') btnCash.classList.add('active'); else btnCash.classList.remove('active');
+            if(source === 'Cash') btnCash.classList.add('active-success'); else btnCash.classList.remove('active-success');
         }
     },
 
@@ -623,71 +746,134 @@ const app = {
         this.renderInstruments();
     },
 
-    renderInstruments: function() {
-        const tbody = document.getElementById('inst-tbody');
-        const term = document.getElementById('search-inst').value.toLowerCase();
-        const locFilter = document.getElementById('filter-location').value;
+    sortLogs: function(key) {
+        if (this.logSortState.key === key) {
+            this.logSortState.direction = this.logSortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.logSortState.key = key;
+            this.logSortState.direction = 'asc'; // 預設升冪
+        }
+        this.renderLogs();
+    },
 
-        this.updateLocationFilter();
+    // === 1. 儀器渲染 ===
+    renderInstruments: function() {
+        const searchEl = document.getElementById('search-inst');
+        const term = searchEl ? searchEl.value.toLowerCase() : '';
+        // ★ 修復：正確抓取 HTML 中的 filter-inst-loc
+        const locFilterEl = document.getElementById('filter-inst-loc');
+        const locFilter = locFilterEl ? locFilterEl.value : '';
+        const isAdmin = this.currentRole === 'Admin';
 
         let filtered = this.data.instruments.filter(inst => {
-            const text = (inst.Name + inst.Instrument_ID + (inst.Vendor_Info||"")).toLowerCase();
-            const matchText = text.includes(term);
+            const matchText = (inst.Name + (inst.Vendor_Info||"") + inst.Manager_ID).toLowerCase().includes(term);
             const matchLoc = locFilter ? inst.Location === locFilter : true;
             return matchText && matchLoc;
         });
 
-        const { key, direction } = this.sortState;
+        const sortKey = this.sortState.key;
+        const dir = this.sortState.direction === 'asc' ? 1 : -1;
         filtered.sort((a, b) => {
-            let valA = a[key] || "";
-            let valB = b[key] || "";
-            
-            if (key === 'Manager_ID') {
-                const mA = this.data.members.find(m => m.Student_ID === valA);
-                const mB = this.data.members.find(m => m.Student_ID === valB);
-                valA = mA ? mA.Name_Ch : valA;
-                valB = mB ? mB.Name_Ch : valB;
-            }
-            if (key === 'Is_Active') {
-                valA = String(valA).toUpperCase();
-                valB = String(valB).toUpperCase();
-            }
-            if (direction === 'asc') {
-                return valA.localeCompare(valB, "zh-Hant");
-            } else {
-                return valB.localeCompare(valA, "zh-Hant");
-            }
+            let valA = a[sortKey] || ''; let valB = b[sortKey] || '';
+            if (sortKey === 'Is_Active') { valA = a.Is_Active ? 1 : 0; valB = b.Is_Active ? 1 : 0; }
+            return valA > valB ? dir : (valA < valB ? -dir : 0);
         });
 
-        if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty">查無儀器資料</td></tr>';
+        UI.renderTable({
+            containerId: 'inst-tbody',
+            data: filtered,
+            columns: [
+                { 
+                    width: '80px', align: 'center', 
+                    render: row => {
+                        const color = row.Is_Active ? 'var(--success)' : 'var(--danger)';
+                        const title = row.Is_Active ? '正常運作' : '報廢停用';
+                        return `<i class="ph-fill ph-circle" style="color:${color}; font-size:1.2rem;" title="${title}"></i>`;
+                    } 
+                },
+                { 
+                    render: row => {
+                        let html = `<strong>${row.Name}</strong>`;
+                        if (row.Linked_Property_IDs && row.Linked_Property_IDs.length > 0) {
+                            html += `<div style="margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px;">`;
+                            row.Linked_Property_IDs.forEach(pid => {
+                                html += `<span style="background: #e2e8f0; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; color: #475569;"><i class="ph ph-tag"></i> ${pid}</span>`;
+                            });
+                            html += `</div>`;
+                        }
+                        return html;
+                    }
+                },
+                { width: '120px', render: row => row.Location },
+                { width: '150px', className: 'hide-mobile', render: row => row.Vendor_Info || '-' },
+                { width: '120px', className: 'hide-mobile', render: row => this.getMemberName(row.Manager_ID) },
+                { width: '80px', align: 'center', render: row => `<button onclick="event.stopPropagation(); app.openInstModal('${row.Instrument_ID}')" class="btn btn-sm btn-secondary" ${isAdmin?'':'disabled'}><i class="ph ph-pencil-simple"></i></button>` }
+            ],
+            emptyMessage: "查無符合的儀器資料",
+            onRowClick: (rowData, tr) => this.toggleInstLogs(rowData, tr)
+        });
+    },
+
+    // === 2. 點擊展開儀器維修歷史 (In-Memory Cache 實作) ===
+    toggleInstLogs: function(instData, tr) {
+        // 如果已經展開了，就關閉它
+        const nextTr = tr.nextElementSibling;
+        if (nextTr && nextTr.classList.contains('sub-row')) {
+            nextTr.remove(); 
             return;
         }
 
-        const isAdmin = this.currentRole === 'Admin';
-        tbody.innerHTML = filtered.map(inst => {
-            const isActive = String(inst.Is_Active).toUpperCase() === 'TRUE';
-            const manager = this.data.members.find(m => m.Student_ID === inst.Manager_ID);
-            const managerName = manager ? manager.Name_Ch : (inst.Manager_ID || '-');
-            const vendor = inst.Vendor_Info || '-';
+        // 關閉其他已展開的面板 (保持畫面乾淨)
+        document.querySelectorAll('.sub-row').forEach(el => el.remove());
 
-            return `
-            <tr>
-                <td>
-                    <span class="mobile-status">
-                        ${isActive ? ' 🟢' : ' 🔴'}
-                    </span>
-                </td>
-                <td style="font-weight:600">${inst.Name}</td>
-                <td>${inst.Location}</td>
-                <td style="color:#666; font-size:0.9em;">${vendor}</td>
-                <td>${managerName}</td>
-                <td>
-                    <button onclick="app.openInstModal('${inst.Instrument_ID}')" class="btn btn-sm btn-secondary" style="white-space:nowrap;" ${isAdmin ? '' : 'disabled'}>✏️</button>
-                </td>
-            </tr>
-            `;
-        }).join('');
+        // 從記憶體中過濾該儀器的所有 logs (零延遲、不消耗 Firebase 讀取數)
+        const logs = this.data.logs.filter(log => log.Instrument_ID === instData.Instrument_ID);
+        
+        // 組合子面板 HTML
+        let logsHtml = `<div style="padding: 15px; background: var(--bg-hover); border-radius: var(--radius-sm); border-left: 4px solid var(--primary); margin: 5px 0;">`;
+        
+        if (logs.length === 0) {
+            logsHtml += `<div style="color: var(--text-muted); font-size: 0.9rem;"><i class="ph ph-info"></i> 此儀器目前無任何維修紀錄。</div>`;
+        } else {
+            logsHtml += `<strong style="display:block; margin-bottom:10px; font-size:0.95rem; color:var(--primary);"><i class="ph ph-clock-counter-clockwise"></i> 歷史維修紀錄 (${logs.length} 筆)</strong>`;
+            
+            // ★ 加入 table-layout: fixed，並為欄位分配精準比例
+            logsHtml += `<table style="width:100%; font-size:0.9rem; margin:0; background: white; box-shadow: var(--shadow-sm); table-layout: fixed;">`;
+            logsHtml += `<tr style="background: #f1f5f9;">
+                <th style="padding: 8px; width: 100px;">日期</th>
+                <th style="padding: 8px; width: 35%;">問題描述</th>
+                <th style="padding: 8px; width: auto;">解決方案</th>
+                <th style="padding: 8px; width: 100px; text-align: center;">狀態</th>
+            </tr>`;
+            
+            // 時間排序 (新到舊)
+            logs.sort((a,b) => new Date(b.Date_Reported) - new Date(a.Date_Reported)).forEach(log => {
+                // 1. 統一狀態圖示與顏色
+                const isClosed = log.Status === 'Closed';
+                const color = isClosed ? 'var(--success)' : 'var(--danger)';
+                const titleText = isClosed ? '已結案' : '待處理';
+                const statusIcon = `<span style="color: ${color};" title="${titleText}"><i class="ph-fill ph-circle" style="font-size:1.2rem;"></i></span>`;
+                
+                // 2. 日期格式化：只取 YYYY-MM-DD
+                const dateFormatted = log.Date_Reported ? log.Date_Reported.split('T')[0].split(' ')[0] : '-';
+
+                // ★ 加上 text-align: center 讓狀態圖示置中
+                logsHtml += `<tr>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${dateFormatted}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${log.Problem_Desc}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${log.Solution || '-'}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: center;">${statusIcon}</td>
+                </tr>`;
+            });
+            logsHtml += `</table>`;
+        }
+        logsHtml += `</div>`;
+
+        // 插入子列到表格中
+        const subTr = document.createElement('tr');
+        subTr.className = 'sub-row';
+        subTr.innerHTML = `<td colspan="6" style="padding: 0; border: none;">${logsHtml}</td>`;
+        tr.after(subTr);
     },
 
     updateLocationFilter: function() {
@@ -703,6 +889,100 @@ const app = {
         });
     },
 
+    // === Modal 內的產編標籤系統 ===
+    renderModalInstTags: function() {
+        const container = document.getElementById('Modal_Linked_Tags');
+        if (!container) return;
+
+        if (this.currentEditingInstTags.length === 0) {
+            container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.9rem; padding: 20px; text-align: center; border: 1px dashed var(--border-color); border-radius: 8px;">目前無關聯的產編</div>';
+            return;
+        }
+
+        container.innerHTML = this.currentEditingInstTags.map(pid => {
+            const invItem = this.data.inventory.find(inv => inv.Property_ID === pid);
+            const propName = invItem ? invItem.Name : '未知財產名稱';
+
+            return `
+            <div class="inv-tag">
+                <span class="inv-tag-name">${propName}</span>
+                <span class="inv-tag-id">${pid}</span>
+                <i class="inv-tag-remove ph ph-x" onclick="app.removeModalInstTag('${pid}')"></i>
+            </div>`;
+        }).join('');
+    },
+
+    removeModalInstTag: function(pid) {
+        const instId = document.getElementById('Instrument_ID').value;
+        // 如果是「新增儀器」狀態 (尚未存入資料庫)，只需從記憶體中移除
+        if (!instId || instId.startsWith('INST_')) {
+            const existingInst = this.data.instruments.find(i => i.Instrument_ID === instId);
+            if (!existingInst) {
+                this.currentEditingInstTags = this.currentEditingInstTags.filter(id => id !== pid);
+                this.renderModalInstTags();
+                return;
+            }
+        }
+        // 如果是編輯既有儀器，則呼叫強大的解綁引擎
+        this.unlinkProperty(pid, instId);
+    },
+
+    // ★ 全新：雙向解綁引擎
+    unlinkProperty: async function(propId, instId) {
+        if (this.currentRole !== 'Admin') return;
+        if (!confirm(`確定要解除產編 [${propId}] 的綁定嗎？\n解除後，該產編將回到「未分配」狀態。`)) return;
+
+        try {
+            // 1. 從儀器中拔除陣列
+            const inst = this.data.instruments.find(i => i.Instrument_ID === instId);
+            if (inst) {
+                const updatedTags = (inst.Linked_Property_IDs || []).filter(id => id !== propId);
+                await updateDoc(doc(db, "instruments", instId), { Linked_Property_IDs: updatedTags });
+            }
+            // 2. 清空產編的實驗室地點
+            await updateDoc(doc(db, "inventory", propId), { Location: "" });
+
+            this.showNotification("✅ 已成功解除綁定！", 'success');
+
+            // 3. 畫面同步：如果目前正開著編輯視窗，即時移除該標籤
+            if (this.currentEditingInstTags && this.currentEditingInstTags.includes(propId)) {
+                this.currentEditingInstTags = this.currentEditingInstTags.filter(id => id !== propId);
+                this.renderModalInstTags();
+            }
+            this.renderInventory();
+        } catch (e) {
+            this.showNotification("解除綁定失敗: " + e.message, 'error');
+        }
+    },
+
+    // === 儀器狀態專用控制函式 (新增) ===
+    setInstActive: function(isActive) {
+        document.getElementById('Is_Active').value = isActive ? 'TRUE' : 'FALSE';
+        const btnTrue = document.getElementById('btn-inst-active-true');
+        const btnFalse = document.getElementById('btn-inst-active-false');
+        
+        if (isActive) {
+            if(btnTrue) { 
+                btnTrue.classList.add('active-success'); 
+                btnTrue.innerHTML = '<i class="ph-fill ph-check-circle"></i> 正常運作'; 
+            }
+            if(btnFalse) { 
+                btnFalse.classList.remove('active-danger'); 
+                btnFalse.innerHTML = '<i class="ph ph-x-circle"></i> 報廢停用'; 
+            }
+        } else {
+            if(btnFalse) { 
+                btnFalse.classList.add('active-danger'); 
+                btnFalse.innerHTML = '<i class="ph-fill ph-x-circle"></i> 報廢停用'; 
+            }
+            if(btnTrue) { 
+                btnTrue.classList.remove('active-success'); 
+                btnTrue.innerHTML = '<i class="ph ph-check-circle"></i> 正常運作'; 
+            }
+        }
+    },
+
+    // === 更新 openInstModal (確保打開時按鈕顏色正確) ===
     openInstModal: function(id = null) {
         if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('inst-modal');
@@ -710,64 +990,81 @@ const app = {
         const inputs = document.querySelectorAll('#inst-modal input, #inst-modal select');
         
         this.fillMemberSelect('Manager_ID');
-
         const locSelect = modal.querySelector('#Location');
         const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean).sort();
-        locSelect.innerHTML = '<option value="">請選擇區域</option>' + 
-            locations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        locSelect.innerHTML = '<option value="">請選擇區域</option>' + locations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
 
         inputs.forEach(el => el.value = '');
         
         if (id) {
             document.getElementById('i-modal-title').innerText = "編輯儀器";
             if (btnDel) btnDel.classList.remove('hidden');
-            
             const inst = this.data.instruments.find(x => x.Instrument_ID === id);
+            this.currentEditingInstTags = inst.Linked_Property_IDs ? [...inst.Linked_Property_IDs] : [];
+
             inputs.forEach(el => {
-                if (el.id && inst[el.id] !== undefined) {
-                    let val = inst[el.id];
-                    if (el.id === 'Is_Active') val = String(val).toUpperCase(); 
-                    el.value = val;
-                }
+                if (el.id && inst[el.id] !== undefined) el.value = inst[el.id];
             });
+            // ★ 強制寫入 ID
+            document.getElementById('Instrument_ID').value = id;
+            this.setInstActive(inst.Is_Active);
         } else {
             document.getElementById('i-modal-title').innerText = "新增儀器";
             if (btnDel) btnDel.classList.add('hidden');
-            // 自動產生含秒數與亂碼的 ID
-            const now = new Date();
-            const timeCode = now.getFullYear() + 
-                String(now.getMonth()+1).padStart(2,'0') + 
-                String(now.getDate()).padStart(2,'0') + 
-                String(now.getHours()).padStart(2,'0') + 
-                String(now.getMinutes()).padStart(2,'0') +
-                String(now.getSeconds()).padStart(2,'0');
-            const randomCode = Math.floor(Math.random() * 900) + 100;
-            
-            document.getElementById('Instrument_ID').value = `INST_${timeCode}_${randomCode}`;
-            document.getElementById('Is_Active').value = 'TRUE';
+            this.currentEditingInstTags = []; 
+            document.getElementById('Instrument_ID').value = this.generateId('INST');
+            this.setInstActive(true);
         }
+        
+        this.renderModalInstTags();
         modal.classList.remove('hidden');
     },
 
     saveInstrument: async function() {
         const id = document.getElementById('Instrument_ID').value;
         if (!id) { alert("請輸入儀器 ID"); return; }
+        
         const payload = {};
-        document.querySelectorAll('#inst-modal input, #inst-modal select').forEach(el => payload[el.id] = el.value);
+        // ★ 修復核心：強制手動將 ID 寫入，避免被過濾器漏掉
+        payload.Instrument_ID = id;
+
+        // 抓取其他表單內容，略過舊的 Property_ID 與手動處理過的 Instrument_ID
+        document.querySelectorAll('#inst-modal input, #inst-modal select').forEach(el => {
+            if (el.id && el.id !== 'Property_ID' && el.id !== 'Instrument_ID') {
+                let val = el.value;
+                // 強制轉回 Boolean
+                if (el.id === 'Is_Active') val = (val === 'TRUE');
+                payload[el.id] = val;
+            }
+        });
+
+        // 寫入我們編輯好的標籤陣列
+        payload.Linked_Property_IDs = this.currentEditingInstTags;
+
+        // 如果是從產編盤點按「下一步」帶過來的，一併加入陣列
+        if (this.tempLinkedPropId && !payload.Linked_Property_IDs.includes(this.tempLinkedPropId)) {
+            payload.Linked_Property_IDs.push(this.tempLinkedPropId);
+        }
 
         const btn = document.getElementById('btn-save-i');
         btn.innerText = "儲存中...";
         btn.disabled = true;
 
         try {
-            await setDoc(doc(db, "instruments", payload.Instrument_ID), payload);
+            // ★ 修復：使用絕對存在的 id 變數作為文件路徑
+            await setDoc(doc(db, "instruments", id), payload);
             
             this.closeModal('inst-modal');
+            this.showNotification("儀器儲存成功", "success");
+            if (typeof this.renderInstruments === 'function') this.renderInstruments();
+            this.renderInventory();
         } catch (e) {
-            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
+            this.showNotification("發生錯誤: " + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;
+            this.tempLinkedPropId = null;
+            this.currentEditingInstTags = [];
         }
     },
 
@@ -803,72 +1100,79 @@ const app = {
         });
     },
 
+    // === 3. 維修紀錄渲染 ===
     renderLogs: function() {
-        const tbody = document.getElementById('log-tbody');
-        const term = document.getElementById('search-log').value.toLowerCase();
+        const searchEl = document.getElementById('search-log');
+        const term = searchEl ? searchEl.value.toLowerCase() : ''; // ★ 安全防呆
         const statusFilter = this.logFilterStatus;
-        const locFilter = document.getElementById('filter-log-location').value; // ★ 1. 取得選擇的地點
+        const locFilterEl = document.getElementById('filter-log-location');
+        const locFilter = locFilterEl ? locFilterEl.value : '';
+        const isAdmin = this.currentRole === 'Admin';
 
-        this.updateLogLocationFilter(); // ★ 2. 確保下拉選單有選項
+        this.updateLogLocationFilter();
 
         let filtered = this.data.logs.filter(log => {
             const inst = this.data.instruments.find(i => i.Instrument_ID === log.Instrument_ID);
             const instName = inst ? inst.Name : log.Instrument_ID;
-            const instLoc = inst ? inst.Location : ""; // ★ 取得該儀器的地點
+            const instLoc = inst ? inst.Location : ""; 
             
             const text = (log.Problem_Desc + instName + log.Log_ID).toLowerCase();
             const matchText = text.includes(term);
             const matchStatus = statusFilter === 'All' ? true : log.Status === statusFilter;
-            const matchLoc = locFilter ? instLoc === locFilter : true; // ★ 3. 判斷地點是否符合
+            const matchLoc = locFilter ? instLoc === locFilter : true;
             
             return matchText && matchStatus && matchLoc;
         });
 
-        // ★ 4. 更改排序邏輯：純看日期往下排 (新 -> 舊)，拿掉嚴重程度的排序
+        // 排序邏輯
+        const sortKey = this.logSortState.key;
+        const dir = this.logSortState.direction === 'asc' ? 1 : -1;
         filtered.sort((a, b) => {
-            // 如果你還是希望「未解決(Open)」的單子優先置頂，可以把下面這行解除註解：
-            // if (a.Status !== b.Status) return a.Status === 'Open' ? -1 : 1; 
+            let valA = a[sortKey] || '';
+            let valB = b[sortKey] || '';
             
-            return new Date(b.Date_Reported) - new Date(a.Date_Reported); 
+            if (sortKey === 'Date_Reported') {
+                return (new Date(valA) - new Date(valB)) * dir;
+            }
+            return valA > valB ? dir : (valA < valB ? -dir : 0);
         });
 
-        if (filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="empty">查無紀錄</td></tr>';
-            return;
-        }
-
-        const isAdmin = this.currentRole === 'Admin';
-        tbody.innerHTML = filtered.map(log => {
-            const isOpen = log.Status === 'Open';
-            const inst = this.data.instruments.find(i => i.Instrument_ID === log.Instrument_ID);
-            const instDisplay = inst ? `${inst.Name} <br><small style='color:#666'>${inst.Location}</small>` : log.Instrument_ID;
-            const owner = this.data.members.find(m => m.Student_ID === log.Owner_ID);
-            const ownerName = owner ? owner.Name_Ch : (log.Owner_ID || '-');
-            const dateDisplay = this.formatDateForInput(log.Date_Reported);
-
-            return `
-            <tr class="log-row ${isOpen ? 'open' : 'closed'} ${isAdmin ? '' : 'disabled'}" ${isAdmin ? `onclick="app.openLogModal('${log.Log_ID}')"` : ''}>
-                <td style="text-align:center;">
-                    <button class="resolve-btn ${!isOpen ? 'checked' : ''}" 
-                        ${isAdmin ? `onclick="event.stopPropagation(); app.quickResolve('${log.Log_ID}')"` : ''} 
-                        title="${isOpen ? '點擊解決' : '已解決'}" ${isAdmin ? '' : 'disabled'}>
-                        ${isOpen ? '' : '✔'}
-                    </button>
-                </td>
-                <td style="color:${this.getUrgencyColor(log.Urgency)}; font-weight:bold;">
-                    ${log.Urgency}
-                </td>
-                <td>${dateDisplay}</td> 
-                <td>${instDisplay}</td>
-                <td style="max-width:250px;">${log.Problem_Desc}</td>
-                <td style="max-width:250px; color:#198754;">${log.Solution || ''}</td>
-                <td>${ownerName}</td>
-                <td>
-                    <button onclick="event.stopPropagation(); app.openLogModal('${log.Log_ID}')" class="btn btn-sm btn-secondary" ${isAdmin ? '' : 'disabled'}>✏️</button>
-                </td>
-            </tr>
-            `;
-        }).join('');
+        UI.renderTable({
+            containerId: 'log-tbody',
+            data: filtered,
+            columns: [
+                { 
+                    width: '80px', align: 'center', 
+                    render: row => {
+                        const isClosed = row.Status === 'Closed';
+                        const color = isClosed ? 'var(--success)' : 'var(--danger)';
+                        const titleText = isClosed ? '已結案' : '待處理';
+                        const cursor = isAdmin ? 'cursor: pointer;' : 'cursor: default;';
+                        
+                        return `<span style="color: ${color}; ${cursor}" 
+                                      onclick="event.stopPropagation(); ${isAdmin ? `app.quickResolve('${row.Log_ID}')` : ''}" 
+                                      title="${isAdmin ? '點擊切換狀態 (' + titleText + ')' : titleText}">
+                                    <i class="ph-fill ph-circle" style="font-size:1.2rem;"></i>
+                                </span>`;
+                    }
+                },
+                { width: '80px', align: 'center', render: row => `<span style="color:${this.getUrgencyColor(row.Urgency)}; font-weight:bold;">${row.Urgency}</span>` },
+                { 
+                    width: '110px', 
+                    // ★ 日期格式化：只取前面的 YYYY-MM-DD
+                    render: row => row.Date_Reported ? row.Date_Reported.split('T')[0].split(' ')[0] : '-' 
+                },
+                { width: '150px', render: row => {
+                    const inst = this.data.instruments.find(i => i.Instrument_ID === row.Instrument_ID);
+                    return inst ? inst.Name : '-';
+                }},
+                { className: 'hide-mobile', render: row => row.Problem_Desc },
+                { className: 'hide-mobile', render: row => `<span style="color:var(--success);">${row.Solution || '-'}</span>` },
+                { width: '100px', className: 'hide-mobile', render: row => this.getMemberName(row.Owner_ID || row.Reporter_ID || row.Reporter) },
+                { width: '80px', align: 'center', render: row => `<button onclick="event.stopPropagation(); app.openLogModal('${row.Log_ID}')" class="btn btn-sm btn-secondary" ${isAdmin?'':'disabled'}><i class="ph ph-pencil-simple"></i></button>` }
+            ],
+            emptyMessage: "目前沒有任何符合的維修紀錄"
+        });
     },
 
     getUrgencyColor: function(u) {
@@ -890,56 +1194,38 @@ const app = {
         if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('log-modal');
         const inputs = document.querySelectorAll('#log-modal input, #log-modal select, #log-modal textarea');
-        const btnDel = document.getElementById('btn-del-l')
+        const btnDel = document.getElementById('btn-del-l');
+        
         this.fillMemberSelect('Owner_ID');
-
         const locSelect = document.getElementById('Log_Location_Filter');
-        const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean);
-        locSelect.innerHTML = '<option value="">請選擇...</option>' + 
-            locations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
-
+        if(locSelect) {
+            const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean);
+            locSelect.innerHTML = '<option value="">請選擇...</option>' + locations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        }
         inputs.forEach(el => el.value = '');
 
         if (id) {
             document.getElementById('l-modal-title').innerText = "編輯維修紀錄";
-            btnDel.classList.remove('hidden');
+            if (btnDel) btnDel.classList.remove('hidden');
             const log = this.data.logs.find(x => x.Log_ID === id);
-            
             inputs.forEach(el => {
                 const key = el.id.replace('Log_', ''); 
                 if (log[el.id] !== undefined) el.value = log[el.id]; 
                 if (log[key] !== undefined) el.value = log[key]; 
-                
-                if (el.type === 'date') {
-                    const dateVal = log[el.id] || log[key];
-                    el.value = this.formatDateForInput(dateVal);
-                }
+                if (el.type === 'date') el.value = this.formatDateForInput(log[el.id] || log[key]);
             });
-
-            const inst = this.data.instruments.find(i => i.Instrument_ID === log.Instrument_ID);
-            if (inst) {
-                locSelect.value = inst.Location;
-                this.filterLogInstruments(); 
-                document.getElementById('Log_Instrument_ID').value = log.Instrument_ID; 
-            }
-
+            document.getElementById('Log_ID').value = id;
+            this.setLogFormStatus(log.Status || 'Open');
+            this.setUrgency(log.Urgency || 3);
         } else {
             document.getElementById('l-modal-title').innerText = "回報問題";
-            btnDel.classList.add('hidden');
-            const now = new Date();
-            const timeCode = now.getFullYear() +
-                String(now.getMonth()+1).padStart(2,'0') +
-                String(now.getDate()).padStart(2,'0') +
-                String(now.getHours()).padStart(2,'0') +
-                String(now.getMinutes()).padStart(2,'0');
-            document.getElementById('Log_ID').value = `LOG_${timeCode}`;
-            
-            document.getElementById('Log_Status').value = 'Open';
+            if (btnDel) btnDel.classList.add('hidden');
+            document.getElementById('Log_ID').value = this.generateId('LOG');
             document.getElementById('Date_Reported').value = this.formatDateForInput(new Date());
-            document.getElementById('Urgency').value = '3';
+            this.setLogFormStatus('Open');
+            this.setUrgency(3); // 預設 3 把火
         }
-
-        modal.classList.remove('hidden');
+        if (modal) modal.classList.remove('hidden');
     },
 
     filterLogInstruments: function() {
@@ -960,12 +1246,11 @@ const app = {
     setupLogAutoStatus: function() {
         const statusSelect = document.getElementById('Log_Status');
         const dateResolved = document.getElementById('Date_Resolved');
-
+        if (!statusSelect || !dateResolved) return; // ★ 安全防呆
+        
         statusSelect.addEventListener('change', function() {
             if (this.value === 'Closed') {
-                if (!dateResolved.value) {
-                    dateResolved.value = app.formatDateForInput(new Date());
-                }
+                if (!dateResolved.value) dateResolved.value = app.formatDateForInput(new Date());
             } else {
                 dateResolved.value = '';
             }
@@ -984,7 +1269,8 @@ const app = {
         });
 
         if (!payload.Instrument_ID) { alert("請選擇儀器"); return; }
-        if (!payload.Problem_Desc) { alert("請填寫問題描述"); return; }
+        // ★ 修正此處：把 Problem_Desc 改為 Description，對應 HTML 的 ID
+        if (!payload.Description) { alert("請填寫問題描述"); return; }
 
         const btn = document.getElementById('btn-save-l');
         btn.innerText = "儲存中...";
@@ -992,8 +1278,9 @@ const app = {
 
         try {
             await setDoc(doc(db, "logs", payload.Log_ID), payload);
-
             this.closeModal('log-modal');
+            this.showNotification("維修紀錄儲存成功", "success");
+            // 若有需要，可以在此補上 this.renderLogs(); 讓畫面自動更新
         } catch (e) {
             this.showNotification("❌ 發生錯誤: " + e.message, 'error');
         } finally {
@@ -1005,98 +1292,101 @@ const app = {
     // ================= 人員管理邏輯 (保留不變) =================
 
     renderMembers: function() {
-        const grid = document.getElementById('member-grid');
-        const term = document.getElementById('search-member').value.toLowerCase();
+        const tbody = document.getElementById('member-tbody');
+        if (!tbody) return;
+        const searchEl = document.getElementById('search-member');
+        const term = searchEl ? searchEl.value.toLowerCase() : '';
+        const isAdmin = this.currentRole === 'Admin';
         
-        const filtered = this.data.members.filter(m => {
-            const text = (m.Name_Ch + m.Name_En + m.Student_ID).toLowerCase();
-            return text.includes(term);
-        });
-
+        let filtered = this.data.members.filter(m => (m.Name_Ch + m.Name_En + m.Student_ID).toLowerCase().includes(term));
         filtered.sort((a, b) => {
             if (a.Status !== b.Status) return a.Status === 'Active' ? -1 : 1;
             return a.Student_ID.localeCompare(b.Student_ID);
         });
 
-        if (filtered.length === 0) {
-            grid.innerHTML = '<div class="empty">查無資料</div>';
-            return;
-        }
+        if (filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="empty">查無資料</td></tr>'; return; }
 
-        const isAdmin = this.currentRole === 'Admin';
-
-        grid.innerHTML = filtered.map(m => {
+        tbody.innerHTML = filtered.map(m => {
             const isAlumni = m.Status === 'Alumni';
-            const studentIdLower = m.Student_ID.toLowerCase();
-            const emailLower = (m.Email || "").toLowerCase();
-            
-            // 狀態與學位顯示邏輯
-            let statusDisplay = "";
-            let degreeShort = "";
-            if (m.Degree === "PhD") degreeShort = "博";
-            else if (m.Degree === "Master") degreeShort = "碩";
-            else if (m.Degree === "Undergrad") degreeShort = "大";
-
-            if (isAlumni) {
-                if (m.Leave_Date && m.Leave_Date !== "-") {
-                    const year = new Date(m.Leave_Date).getFullYear();
-                    statusDisplay = `🎓 ${year} ${degreeShort}畢`;
-                } else {
-                    statusDisplay = `🎓 已${degreeShort}畢`;
-                }
-            } else {
-                statusDisplay = this.calculateGrade(m.Enrollment_Date, m.Degree);
-            }
-
-            // Email 區塊邏輯
-            let emailHtml = "";
-            if (!isAlumni) {
-                emailHtml = `
-                <div class="email-row" onclick="app.copyEmail(event, '${emailLower}')" title="點擊複製信箱">
-                    <span class="icon start-icon">📧</span> 
-                    <span class="email-text">${emailLower}</span>
-                    <span class="icon copy-btn-icon">📋</span>
-                </div>`;
-            }
-
-            // ★ 修改重點：只顯示 Admin 標籤
-            const adminBadge = (m.Role === 'Admin') 
-                ? `<span class="role-badge Admin">Admin</span>` 
-                : '';
+            const degreeShort = m.Degree === "PhD" ? "博" : (m.Degree === "Master" ? "碩" : "大");
+            const statusDisplay = isAlumni ? `🎓 已畢` : this.calculateGrade(m.Enrollment_Date, m.Degree);
+            const adminBadge = m.Role === 'Admin' ? `<span class="role-badge Admin">Admin</span>` : '';
 
             return `
-            <div class="card ${isAlumni ? 'alumni' : ''} ${isAdmin ? '' : 'disabled'}" ${isAdmin ? `onclick="app.openMemberModal('${m.Student_ID}')"` : ''}>
-                
-                <div class="card-header-flex">
-                    <h3>
-                        ${m.Name_Ch} 
-                        <small style="color:#888; font-weight:normal; font-size:0.85em; display:block; margin-top:2px;">
-                            ${m.Name_En} ${m.Surname_En}
-                        </small>
-                    </h3>
-                    ${adminBadge}
-                </div>
-
-                <div class="card-body">
-                    <p><span class="icon">🆔</span> ${studentIdLower}</p>
-                    <p><span class="icon">📅</span> ${statusDisplay}</p>
-                    <p><span class="icon">🏫</span> ${m.Department}</p>
-                    ${emailHtml}
-                </div>
-            </div>`;
+            <tr ${isAdmin ? `onclick="app.openMemberModal('${m.Student_ID}')" style="cursor:pointer;"` : ''}>
+                <td style="width:80px; text-align:center;">${statusDisplay}</td>
+                <td><strong>${m.Name_Ch}</strong> <br><small style="color:var(--secondary);" class="hide-mobile">${m.Name_En || ''}</small></td>
+                <td class="hide-mobile">${m.Student_ID}</td>
+                <td class="hide-mobile">${m.Department}</td>
+                <td>${adminBadge}</td>
+                <td style="text-align:center;">
+                    <button class="btn btn-sm btn-secondary" ${isAdmin?'':'disabled'}><i class="ph ph-pencil-simple"></i></button>
+                </td>
+            </tr>`;
         }).join('');
+    },
+
+    // === 自訂 UI 切換按鈕邏輯 ===
+
+    // 1. 人員狀態切換
+    setMemberStatus: function(status) {
+        document.getElementById('Status').value = status;
+        const btnActive = document.getElementById('btn-status-active');
+        const btnAlumni = document.getElementById('btn-status-alumni');
+        
+        if(status === 'Active') {
+            if(btnActive) btnActive.classList.add('active-success');
+            if(btnAlumni) btnAlumni.classList.remove('active-danger');
+        } else {
+            if(btnAlumni) btnAlumni.classList.add('active-danger');
+            if(btnActive) btnActive.classList.remove('active-success');
+        }
+    },
+
+    // 2. 維修紀錄狀態切換
+    setLogFormStatus: function(status) {
+        document.getElementById('Log_Status').value = status;
+        const btnOpen = document.getElementById('btn-log-open');
+        const btnClosed = document.getElementById('btn-log-closed');
+        const dateResolved = document.getElementById('Date_Resolved');
+        
+        if(status === 'Open') {
+            if(btnOpen) btnOpen.classList.add('active-danger');
+            if(btnClosed) btnClosed.classList.remove('active-success');
+            if(dateResolved) dateResolved.value = '';
+        } else {
+            if(btnClosed) btnClosed.classList.add('active-success');
+            if(btnOpen) btnOpen.classList.remove('active-danger');
+            if (dateResolved && !dateResolved.value) dateResolved.value = app.formatDateForInput(new Date());
+        }
+    },
+
+    // 3. 火焰評分特效
+    setUrgency: function(level) {
+        document.getElementById('Urgency').value = level;
+        const fires = document.querySelectorAll('#urgency-rating .ph-fire');
+        fires.forEach((fire, index) => {
+            if (index < level) {
+                fire.style.color = 'var(--danger)'; 
+            } else {
+                fire.style.color = '#e2e8f0'; // 灰色代表未點燃
+            }
+        });
     },
 
     openMemberModal: function(id = null) {
         if (this.currentRole !== 'Admin') return;
         const modal = document.getElementById('member-modal');
+        // ★ 修復：正確抓取所有 input
         const inputs = document.querySelectorAll('#member-modal input, #member-modal select');
-        const btnDel = document.getElementById('btn-del-m');
+        const btnDel = document.getElementById('btn-del-m'); 
+        
         inputs.forEach(el => el.value = '');
 
         if (id) {
             document.getElementById('m-modal-title').innerText = "編輯成員";
-            btnDel.classList.remove('hidden');
+            if (btnDel) btnDel.classList.remove('hidden'); 
+            
             const m = this.data.members.find(x => x.Student_ID === id);
             inputs.forEach(el => {
                 if(el.id && m[el.id] !== undefined) { 
@@ -1109,7 +1399,8 @@ const app = {
                 }
             });
             document.getElementById('Student_ID').disabled = true;
-            // 回填綁定狀態
+            this.setMemberStatus(m.Status || 'Active');
+
             if (m.Google_UID) {
                 document.getElementById('Bind_Status').value = "✅ 已綁定";
                 document.getElementById('btn-unbind').classList.remove('hidden');
@@ -1119,14 +1410,14 @@ const app = {
             }
         } else {
             document.getElementById('m-modal-title').innerText = "新增成員";
+            if (btnDel) btnDel.classList.add('hidden'); 
+            document.getElementById('Student_ID').disabled = false;
             document.getElementById('Bind_Status').value = "❌ 未綁定";
             document.getElementById('btn-unbind').classList.add('hidden');
-            btnDel.classList.add('hidden');
-            document.getElementById('Student_ID').disabled = false;
-            document.getElementById('Status').value = 'Active';
+            this.setMemberStatus('Active');
             document.getElementById('Role').value = 'User';
         }
-        modal.classList.remove('hidden');
+        if (modal) modal.classList.remove('hidden');
     },
 
     unbindMember: async function() {
@@ -1211,11 +1502,12 @@ const app = {
     // ================= 共用工具 =================
 
     closeModal: function(modalId) {
-        document.getElementById(modalId).classList.add('hidden');
+        const m = document.getElementById(modalId);
+        if (m) m.classList.add('hidden'); // 加入防呆
     },
 
     setupModalEvents: function() {
-        ['member-modal', 'inst-modal', 'log-modal', 'acc-modal'].forEach(id => {
+        ['member-modal', 'inst-modal', 'log-modal', 'acc-modal', 'help-modal'].forEach(id => {
             const modal = document.getElementById(id);
             if(modal) modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(id); });
         });
@@ -1301,8 +1593,580 @@ const app = {
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day = String(d.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
-    }
+    },
+    // ================= 產編清點邏輯 (Phase 1.3) =================
+
+    setInvFilter: function(status) {
+        this.invFilterStatus = status;
+        document.querySelectorAll('.filter-chip[data-inv-val]').forEach(btn => {
+            if (btn.dataset.invVal === status) btn.classList.add('active');
+            else btn.classList.remove('active');
+        });
+        this.renderInventory();
+    },
+
+    // ================= 產編清點與橋接邏輯 (最終版) =================
+
+    // === Excel 兩階段匯入：階段一 (預覽解析) ===
+    previewExcel: function(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+
+                // 跳過前 6 行合併儲存格，將第 7 行視為標題
+                const rows = XLSX.utils.sheet_to_json(firstSheet, { range: 6, defval: "" });
+
+                const existingMap = new Map();
+                this.data.inventory.forEach(item => existingMap.set(item.Property_ID, item));
+
+                this.tempImportPayloads = []; // 清空暫存
+                const tbody = document.getElementById('import-preview-tbody');
+                tbody.innerHTML = ''; // 清空表格
+
+                rows.forEach(row => {
+                    if (!row['財物編號'] || !row['校號']) return;
+
+                    const propId = `${String(row['財物編號']).trim()}-${String(row['校號']).trim()}-${row['附件'] ? String(row['附件']).trim() : '00'}`;
+                    const existingItem = existingMap.get(propId);
+
+                    const payload = {
+                        Property_ID: propId,
+                        Name: row['財物名稱'] ? String(row['財物名稱']).trim() : '',
+                        Brand: row['廠牌'] ? String(row['廠牌']).trim() : '',
+                        Model: (row['型式'] || row['形式']) ? String(row['型式'] || row['形式']).trim() : '',
+                        Price: row['單價'] ? Number(row['單價']) : 0,
+                        Acquire_Date: row['取得日期'] ? String(row['取得日期']).trim() : '',
+                        Lifespan: row['年限'] ? String(row['年限']).trim() : ''
+                    };
+
+                    // 判斷是新增還是更新
+                    let actionText = '';
+                    let actionColor = '';
+
+                    if (existingItem) {
+                        payload.Location = existingItem.Location || '';
+                        payload.Personal_Remark = existingItem.Personal_Remark || '';
+                        payload.Status = existingItem.Status || 'Pending';
+                        payload.Checked_By = existingItem.Checked_By || null;
+                        actionText = '更新 (保留客製區域)';
+                        actionColor = 'var(--secondary)';
+                    } else {
+                        payload.Location = '';
+                        payload.Personal_Remark = '';
+                        payload.Status = 'Pending';
+                        payload.Checked_By = null;
+                        actionText = '全新建立';
+                        actionColor = 'var(--success)';
+                    }
+
+                    this.tempImportPayloads.push(payload);
+
+                    // 畫出預覽列
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-family: monospace;">${payload.Property_ID}</td>
+                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color);">${payload.Name}</td>
+                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 0.85rem; color: var(--text-muted);">${payload.Brand} / ${payload.Model}</td>
+                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); color: ${actionColor}; font-weight: bold; font-size: 0.85rem;">${actionText}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                document.getElementById('preview-count').innerText = this.tempImportPayloads.length;
+                UI.openModal({ modalId: 'import-preview-modal', title: '確認匯入資料 (預覽)' });
+
+            } catch (error) {
+                console.error("Excel 解析失敗:", error);
+                this.showNotification("檔案解析失敗，請確認是否為符合格式的 Excel 檔。", 'error');
+            } finally {
+                event.target.value = ''; // 允許重複上傳
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    },
+
+    // === Excel 兩階段匯入：階段二 (確認寫入資料庫) ===
+    confirmImport: async function() {
+        if (this.tempImportPayloads.length === 0) {
+            this.showNotification("沒有可寫入的資料！", 'warning');
+            return;
+        }
+
+        const btn = document.getElementById('btn-confirm-import');
+        btn.innerText = "寫入中...";
+        btn.disabled = true;
+
+        try {
+            const batch = writeBatch(db);
+            this.tempImportPayloads.forEach(payload => {
+                const docRef = doc(db, "inventory", payload.Property_ID);
+                batch.set(docRef, payload, { merge: true });
+            });
+
+            await batch.commit();
+            
+            this.showNotification(`🎉 成功寫入 ${this.tempImportPayloads.length} 筆產編資料！`, 'success');
+            app.closeModal('import-preview-modal');
+            this.renderInventory();
+
+        } catch (error) {
+            console.error("寫入 Firebase 失敗:", error);
+            this.showNotification("寫入失敗: " + error.message, 'error');
+        } finally {
+            btn.innerText = "確認並寫入系統";
+            btn.disabled = false;
+            this.tempImportPayloads = []; // 寫入完畢後清空暫存
+        }
+    },
+
+    // === 產編排序與渲染 ===
+    sortInventory: function(key) {
+        if (this.invSortState.key === key) {
+            this.invSortState.direction = this.invSortState.direction === 'asc' ? 'desc' : 'asc';
+        } else {
+            this.invSortState.key = key;
+            this.invSortState.direction = 'asc';
+        }
+        this.renderInventory();
+    },
+
+    // === 畫面渲染 (含廠牌副標題與資訊按鈕) ===
+    renderInventory: function() {
+        const term = document.getElementById('search-inv').value.toLowerCase();
+        const statusFilter = this.invFilterStatus || 'All';
+        const locFilter = document.getElementById('filter-inv-location') ? document.getElementById('filter-inv-location').value : '';
+        const isAdmin = this.currentRole === 'Admin';
+        const standardLocs = ["多腔體區", "機房", "製程區", "黃光室", "量測區", "辦公區", "頂樓"];
+
+        let filtered = this.data.inventory.filter(item => {
+            const text = (
+                String(item.Property_ID || '') + 
+                String(item.Name || '') + 
+                String(item.Location || '') + 
+                String(item.Personal_Remark || '')
+            ).toLowerCase();
+            
+            const matchText = text.includes(term);
+            const matchStatus = statusFilter === 'All' ? true : item.Status === statusFilter;
+            
+            let matchLoc = true;
+            if (locFilter === '其他') {
+                matchLoc = item.Location && !standardLocs.includes(item.Location);
+            } else if (locFilter) {
+                matchLoc = item.Location === locFilter;
+            }
+            return matchText && matchStatus && matchLoc;
+        });
+
+        const sortKey = this.invSortState.key;
+        const dir = this.invSortState.direction === 'asc' ? 1 : -1;
+        filtered.sort((a, b) => {
+            let valA = a[sortKey] || '';
+            let valB = b[sortKey] || '';
+            return valA > valB ? dir : (valA < valB ? -dir : 0);
+        });
+
+        UI.renderTable({
+            containerId: 'inv-tbody',
+            data: filtered,
+            columns: [
+                { 
+                    width: '80px', align: 'center', 
+                    render: row => {
+                        const isChecked = row.Status === 'Checked';
+                        const color = isChecked ? 'var(--success)' : 'var(--danger)';
+                        const titleText = isChecked ? '已盤點' : '未盤點';
+                        
+                        let checkerName = '';
+                        if (isChecked && row.Checked_By) {
+                            const name = this.getMemberName(row.Checked_By);
+                            checkerName = name === row.Checked_By ? '未知人員' : name;
+                        }
+                        
+                        return `<div style="text-align:center; ${isAdmin?'cursor: pointer;':''}" 
+                                     onclick="event.stopPropagation(); app.toggleInvStatus('${row.Property_ID}', '${row.Status}')"
+                                     title="${isAdmin ? '點擊切換 (' + titleText + ')' : titleText}">
+                                    <div style="line-height: 1;"><i class="ph-fill ph-circle" style="color: ${color}; font-size: 1.3rem;"></i></div>
+                                    ${checkerName ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 2px;">${checkerName}</div>` : ''}
+                                </div>`;
+                    }
+                },
+                { width: '150px', render: row => `<strong style="font-family: monospace;">${row.Property_ID}</strong>` },
+                { 
+                    // 財物名稱 (含廠牌/型式副標題)
+                    render: row => {
+                        const linkedInst = this.data.instruments.find(inst => 
+                            inst.Linked_Property_IDs && inst.Linked_Property_IDs.includes(row.Property_ID)
+                        );
+                        
+                        let html = `<div style="font-weight: 600; color: var(--text-main); line-height: 1.4;">${row.Name || '未命名'}</div>`;
+                        
+                        if (row.Brand || row.Model) {
+                            const brandText = row.Brand ? row.Brand : '';
+                            const modelText = row.Model ? row.Model : '';
+                            html += `<div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 2px;">${brandText} ${modelText}</div>`;
+                        }
+                        
+                        if (linkedInst) {
+                            html += `<div style="margin-top: 4px;">
+                                        <span style="background: #f1f5f9; color: var(--secondary); font-size: 0.75rem; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color); display: inline-flex; align-items: center; gap: 4px;">
+                                            <i class="ph ph-link"></i> 已綁定至：${linkedInst.Name}
+                                        </span>
+                                     </div>`;
+                        }
+                        return html;
+                    }
+                },
+                { 
+                    width: '120px', 
+                    render: row => {
+                        return `<div style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" 
+                                     onclick="event.stopPropagation(); app.openInvLocationModal('${row.Property_ID}')" title="點擊編輯區域">
+                                    <span>${row.Location || '-'}</span>
+                                    <i class="ph ph-pencil-simple" style="color: var(--primary); opacity: 0.3;"></i>
+                                </div>`;
+                    }
+                },
+                { 
+                    width: '200px', 
+                    render: row => {
+                        const text = row.Personal_Remark || '<span style="color:#aaa; font-style:italic;">點擊編輯...</span>';
+                        return `<div style="cursor:pointer; display:flex; justify-content:space-between; align-items:center;" 
+                                    onclick="event.stopPropagation(); app.openInvRemarkModal('${row.Property_ID}')" title="點擊編輯細項位置">
+                                    <span>${text}</span>
+                                    <i class="ph ph-pencil-simple" style="color: var(--primary); opacity: 0.6;"></i>
+                                </div>`;
+                    }
+                },
+                { 
+                    width: '110px', align: 'center', 
+                    // 操作按鈕 (資訊 + 連結/解綁)
+                    render: row => {
+                        const linkedInst = this.data.instruments.find(inst => 
+                            inst.Linked_Property_IDs && inst.Linked_Property_IDs.includes(row.Property_ID)
+                        );
+                        
+                        const infoBtn = `<button onclick="event.stopPropagation(); app.openInvDetailsModal('${row.Property_ID}')" 
+                                            class="btn btn-sm btn-secondary" title="查看詳細資料" style="padding: 4px 8px;">
+                                            <i class="ph ph-info"></i>
+                                         </button>`;
+
+                        let linkBtn = '';
+                        if (linkedInst) {
+                            linkBtn = `<button onclick="event.stopPropagation(); app.unlinkProperty('${row.Property_ID}', '${linkedInst.Instrument_ID}')" 
+                                            class="btn btn-sm btn-danger" title="解除綁定" ${isAdmin?'':'disabled'} style="padding: 4px 8px;">
+                                        <i class="ph ph-link-break"></i>
+                                    </button>`;
+                        } else {
+                            linkBtn = `<button onclick="event.stopPropagation(); app.openLinkModal('${row.Property_ID}')" 
+                                            class="btn btn-sm btn-primary" title="新增關聯" ${isAdmin?'':'disabled'} style="padding: 4px 8px;">
+                                        <i class="ph ph-link"></i>
+                                    </button>`;
+                        }
+
+                        return `<div style="display: flex; justify-content: center; gap: 6px;">${infoBtn}${linkBtn}</div>`;
+                    }
+                }
+            ],
+            emptyMessage: "目前沒有盤點資料！",
+            onRowClick: (rowData) => { if (isAdmin) app.toggleInvStatus(rowData.Property_ID, rowData.Status); }
+        });
+    },
+
+    openInvLocationModal: function(propId) {
+        if (this.currentRole !== 'Admin') return;
+        const item = this.data.inventory.find(i => i.Property_ID === propId);
+        if (!item) return;
+        document.getElementById('Loc_Prop_ID').value = propId;
+        document.getElementById('Loc_Select_Value').value = item.Location || '其他';
+        UI.openModal({ modalId: 'inv-loc-modal', title: '編輯實驗區域' });
+    },
+
+    saveInvLocation: async function() {
+        const propId = document.getElementById('Loc_Prop_ID').value;
+        const newLoc = document.getElementById('Loc_Select_Value').value;
+        try {
+            await updateDoc(doc(db, "inventory", propId), { Location: newLoc });
+            app.closeModal('inv-loc-modal');
+            this.showNotification("區域已更新", 'success');
+
+            // ★ 補上這行：強制更新產編畫面
+            this.renderInventory(); 
+        } catch (e) {
+            this.showNotification("更新失敗", 'error');
+        }
+    },
+
+    // 點擊切換盤點狀態 (這支 Function 之前被你漏掉了)
+    toggleInvStatus: async function(propId, currentStatus) {
+        if (this.currentRole !== 'Admin') return;
+        const newStatus = currentStatus === 'Pending' ? 'Checked' : 'Pending';
+        const checkedBy = newStatus === 'Checked' ? this.currentUser.uid : null;
+        try {
+            await updateDoc(doc(db, "inventory", propId), { 
+                Status: newStatus,
+                Checked_By: checkedBy 
+            });
+        } catch (e) {
+            this.showNotification("狀態更新失敗: " + e.message, 'error');
+        }
+    },
+
+    // 編輯備註 Modal (這支 Function 之前也被漏掉了)
+    openInvRemarkModal: function(propId) {
+        if (this.currentRole !== 'Admin') return;
+        const item = this.data.inventory.find(i => i.Property_ID === propId);
+        if (!item) return;
+        
+        document.getElementById('Remark_Prop_ID').value = propId;
+        document.getElementById('Remark_Text').value = item.Personal_Remark || '';
+        UI.openModal({ modalId: 'remark-modal', title: '編輯細項位置' });
+    },
+
+    saveInvRemark: async function() {
+        const propId = document.getElementById('Remark_Prop_ID').value;
+        const text = document.getElementById('Remark_Text').value.trim();
+        try {
+            await updateDoc(doc(db, "inventory", propId), { Personal_Remark: text });
+            app.closeModal('remark-modal');
+            this.showNotification("備註已更新", 'success');
+            
+            // ★ 補上這行：強制更新產編畫面
+            this.renderInventory(); 
+        } catch (e) {
+            this.showNotification("更新失敗: " + e.message, 'error');
+        }
+    },
+
+    // === 產編詳細資訊 Modal ===
+    openInvDetailsModal: function(propId) {
+        const item = this.data.inventory.find(i => i.Property_ID === propId);
+        if (!item) return;
+
+        const formatMoney = (num) => {
+            return num ? new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(num) : '無紀錄';
+        };
+
+        const tbody = document.getElementById('inv-details-tbody');
+        
+        const labelStyle = "padding: 10px 8px; color: var(--text-muted); width: 100px; white-space: nowrap; vertical-align: top;";
+        const valueStyle = "padding: 10px 8px; word-break: break-word; vertical-align: top;";
+
+        tbody.innerHTML = `
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">財產編號</td>
+                <td style="${valueStyle} font-family: monospace; font-weight: bold;">${item.Property_ID}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">財物名稱</td>
+                <td style="${valueStyle} font-weight: bold;">${item.Name || '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">廠牌 / 型式</td>
+                <td style="${valueStyle}">${item.Brand || '-'} / ${item.Model || '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">取得單價</td>
+                <td style="${valueStyle} color: var(--danger); font-weight: bold;">${formatMoney(item.Price)}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">取得日期</td>
+                <td style="${valueStyle}">${item.Acquire_Date || '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">使用年限</td>
+                <td style="${valueStyle}">${item.Lifespan ? item.Lifespan + ' 年' : '-'}</td>
+            </tr>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+                <td style="${labelStyle}">實驗區域</td>
+                <td style="${valueStyle} color: var(--primary); font-weight: 600;">${item.Location || '-'}</td>
+            </tr>
+            <tr>
+                <td style="${labelStyle}">細項備註</td>
+                <td style="${valueStyle}">${item.Personal_Remark || '-'}</td>
+            </tr>
+        `;
+
+        UI.openModal({ modalId: 'inv-details-modal', title: '財產詳細資訊' });
+    },
+    // === Excel 匯出功能 (補回遺失的函式) ===
+    exportInventoryExcel: function() {
+        if (this.data.inventory.length === 0) {
+            this.showNotification("目前沒有資料可以匯出！", "warning");
+            return;
+        }
+
+        // 將 JSON 資料格式化為學校盤點所需的結構
+        const exportData = this.data.inventory.map(item => {
+            const parts = item.Property_ID.split('-');
+            const part1 = parts[0] || '';
+            const part2 = parts[1] || '';
+            const part3 = parts[2] || '';
+
+            return {
+                '財物編號': part1,
+                '校號': part2,
+                '附件': part3,
+                '財物名稱': item.Name || '',
+                '廠牌': item.Brand || '',
+                '型式': item.Model || '',
+                '單價': item.Price || '',
+                '取得日期': item.Acquire_Date || '',
+                '年限': item.Lifespan || '',
+                '實驗區域(系統)': item.Location || '',
+                '細項備註(系統)': item.Personal_Remark || '',
+                '盤點狀態': item.Status === 'Checked' ? 'V' : '',
+                '盤點人': item.Checked_By ? this.getMemberName(item.Checked_By) : ''
+            };
+        });
+
+        // 建立工作表與下載
+        const worksheet = XLSX.utils.json_to_sheet(exportData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "實驗室盤點結果");
+
+        const today = new Date().toISOString().split('T')[0];
+        XLSX.writeFile(workbook, `實驗室盤點結果_${today}.xlsx`);
+        this.showNotification("Excel 匯出成功！", "success");
+    },
+
+    // === 全新橋接關聯 UX ===
+    openLinkModal: function(propId) {
+        if (this.currentRole !== 'Admin') return;
+        const item = this.data.inventory.find(i => i.Property_ID === propId);
+        if (!item) return;
+
+        document.getElementById('Link_Prop_ID').value = propId;
+        document.getElementById('Link_Prop_Name').innerText = item.Name;
+        document.getElementById('Link_Prop_Code').innerText = propId;
+        document.getElementById('Link_New_Name').value = item.Name; 
+        document.getElementById('Link_Location').value = ''; 
+
+        // ★ 修復：呼叫新的 selectLinkMode 取代舊的 Radio 點擊
+        this.selectLinkMode('existing');
+
+        UI.openModal({ modalId: 'link-modal', title: '產編關聯作業' });
+    },
+
+    // ★ 全新的切換模式邏輯 (對應 HTML 的按鈕)
+    selectLinkMode: function(mode) {
+        document.getElementById('Link_Mode_Selected').value = mode;
+        
+        // 視覺特效：切換 active 狀態
+        const btnExisting = document.getElementById('mode-btn-existing');
+        const btnNew = document.getElementById('mode-btn-new');
+        if (btnExisting) btnExisting.classList.toggle('active', mode === 'existing');
+        if (btnNew) btnNew.classList.toggle('active', mode === 'new');
+
+        // 切換下方顯示區塊
+        if (mode === 'existing') {
+            document.getElementById('link-existing-section').classList.remove('hidden');
+            document.getElementById('link-new-section').classList.add('hidden');
+            document.getElementById('btn-link-existing').classList.remove('hidden');
+            document.getElementById('btn-link-new').classList.add('hidden');
+            this.onLinkLocationChange();
+        } else {
+            document.getElementById('link-existing-section').classList.add('hidden');
+            document.getElementById('link-new-section').classList.remove('hidden');
+            document.getElementById('btn-link-existing').classList.add('hidden');
+            document.getElementById('btn-link-new').classList.remove('hidden');
+        }
+    },
+
+    onLinkLocationChange: function() {
+        // ★ 這裡改從隱藏的 Input 抓取目前的模式
+        const mode = document.getElementById('Link_Mode_Selected').value;
+        if (mode !== 'existing') return;
+
+        const loc = document.getElementById('Link_Location').value;
+        const select = document.getElementById('Link_Select_Inst');
+        
+        if (!loc) {
+            select.innerHTML = '<option value="">請先選擇上方區域...</option>';
+            return;
+        }
+
+        const availableInsts = this.data.instruments.filter(i => i.Is_Active && i.Location === loc);
+        if (availableInsts.length === 0) {
+            select.innerHTML = '<option value="">此區域目前沒有任何儀器！</option>';
+        } else {
+            select.innerHTML = '<option value="">請選擇儀器...</option>';
+            availableInsts.forEach(inst => {
+                select.innerHTML += `<option value="${inst.Instrument_ID}">${inst.Name}</option>`;
+            });
+        }
+    },
+
+    submitLinkInst: async function() {
+        const propId = document.getElementById('Link_Prop_ID').value;
+        const mode = document.getElementById('Link_Mode_Selected').value;
+        const loc = document.getElementById('Link_Location').value;
+        
+        if (!loc) {
+            this.showNotification("請先選擇實驗室區域！", "warning");
+            return;
+        }
+
+        if (mode === 'existing') {
+            const instId = document.getElementById('Link_Select_Inst').value;
+            if (!instId) {
+                this.showNotification("請選擇要連結的儀器！", "warning");
+                return;
+            }
+            try {
+                await updateDoc(doc(db, "instruments", instId), { Linked_Property_IDs: arrayUnion(propId) });
+                await updateDoc(doc(db, "inventory", propId), { Location: loc });
+                this.showNotification("成功關聯！", 'success');
+                app.closeModal('link-modal');
+
+                // ★ 補上這行：強制更新產編畫面
+                this.renderInventory(); 
+            } catch (e) { this.showNotification("錯誤: " + e.message, 'error'); }
+        } else {
+            const newName = document.getElementById('Link_New_Name').value.trim();
+            if (!newName) {
+                this.showNotification("請輸入名稱！", "warning");
+                return;
+            }
+            this.tempLinkedPropId = propId; 
+            app.closeModal('link-modal');
+            this.openInstModal(); 
+            
+            // 自動帶入產編號碼與名稱
+            setTimeout(() => {
+                const nameInput = document.getElementById('Name') || document.getElementById('Inst_Name'); 
+                const locInput = document.getElementById('Location') || document.getElementById('Inst_Location'); 
+                const idInput = document.getElementById('Instrument_ID') || document.getElementById('Inst_ID');
+                
+                if (nameInput) nameInput.value = newName;
+                if (locInput) locInput.value = loc;
+                if (idInput) idInput.value = this.generateId('INST');
+                
+                this.showNotification("已自動帶入產編、名稱與區域！", "info");
+            }, 150);
+        }
+    },
 };
+
+// ================= 全域 UX 監聽器 =================
+// 支援按 ESC 鍵關閉 Modal
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal:not(.hidden)').forEach(m => app.closeModal(m.id));
+    }
+});
+// 支援點擊 Modal 黑色半透明背景關閉
+document.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal')) {
+        app.closeModal(e.target.id);
+    }
+});
 
 window.app = app;
 
