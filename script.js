@@ -118,7 +118,7 @@ const app = {
             </ul>`,
         
         'accounting': `
-            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">公積金與帳務系統</h3>
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">公積金報帳系統</h3>
             <p style="margin-bottom: 10px;">監控銀行帳戶餘額、實驗室現金水位與代墊款項核銷進度。</p>
             <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
                 <li><strong>帳務燈號警示：</strong>
@@ -405,7 +405,7 @@ const app = {
             'members': '人員管理',
             'instruments': '儀器設備',
             'logs': '維修紀錄',
-            'accounting': '公積金與報帳',
+            'accounting': '公積金報帳',
             'inventory': '產編清點'
         };
         const titleEl = document.getElementById('current-page-title');
@@ -839,29 +839,29 @@ const app = {
             
             // ★ 加入 table-layout: fixed，並為欄位分配精準比例
             logsHtml += `<table style="width:100%; font-size:0.9rem; margin:0; background: white; box-shadow: var(--shadow-sm); table-layout: fixed;">`;
+            // ★ 修改表頭：給解決方案加上 hide-mobile
             logsHtml += `<tr style="background: #f1f5f9;">
                 <th style="padding: 8px; width: 100px;">日期</th>
-                <th style="padding: 8px; width: 35%;">問題描述</th>
-                <th style="padding: 8px; width: auto;">解決方案</th>
-                <th style="padding: 8px; width: 100px; text-align: center;">狀態</th>
+                <th style="padding: 8px; width: auto;">問題描述</th>
+                <th style="padding: 8px; width: 30%;" class="hide-mobile">解決方案</th>
+                <th style="padding: 8px; width: 80px; text-align: center;">狀態</th>
             </tr>`;
             
-            // 時間排序 (新到舊)
             logs.sort((a,b) => new Date(b.Date_Reported) - new Date(a.Date_Reported)).forEach(log => {
-                // 1. 統一狀態圖示與顏色
                 const isClosed = log.Status === 'Closed';
                 const color = isClosed ? 'var(--success)' : 'var(--danger)';
                 const titleText = isClosed ? '已結案' : '待處理';
                 const statusIcon = `<span style="color: ${color};" title="${titleText}"><i class="ph-fill ph-circle" style="font-size:1.2rem;"></i></span>`;
                 
-                // 2. 日期格式化：只取 YYYY-MM-DD
                 const dateFormatted = log.Date_Reported ? log.Date_Reported.split('T')[0].split(' ')[0] : '-';
 
-                // ★ 加上 text-align: center 讓狀態圖示置中
-                logsHtml += `<tr>
+                // ★ 修改行資料：讓整行可點擊，加入 mobile-truncate 與 hide-mobile
+                logsHtml += `<tr style="cursor: pointer;" onclick="app.openLogModal('${log.Log_ID}', true)" title="點擊檢視詳細紀錄">
                     <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${dateFormatted}</td>
-                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${log.Problem_Desc}</td>
-                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">${log.Solution || '-'}</td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);">
+                        <div class="mobile-truncate" style="max-width: 150px;">${log.Problem_Desc}</div>
+                    </td>
+                    <td style="padding: 8px; border-bottom: 1px solid var(--border-color);" class="hide-mobile">${log.Solution || '-'}</td>
                     <td style="padding: 8px; border-bottom: 1px solid var(--border-color); text-align: center;">${statusIcon}</td>
                 </tr>`;
             });
@@ -1190,11 +1190,13 @@ const app = {
         }
     },
 
-    openLogModal: function(id = null) {
-        if (this.currentRole !== 'Admin') return;
+    // ★ 參數新增 readOnly，預設為 false
+    openLogModal: function(id = null, readOnly = false) {
+        if (this.currentRole !== 'Admin' && !readOnly) return; // 允許所有人「檢視」
         const modal = document.getElementById('log-modal');
         const inputs = document.querySelectorAll('#log-modal input, #log-modal select, #log-modal textarea');
         const btnDel = document.getElementById('btn-del-l');
+        const btnSave = document.getElementById('btn-save-l');
         
         this.fillMemberSelect('Owner_ID');
         const locSelect = document.getElementById('Log_Location_Filter');
@@ -1204,9 +1206,26 @@ const app = {
         }
         inputs.forEach(el => el.value = '');
 
+        // --- 純檢視模式 vs 編輯模式的 UI 切換 ---
+        if (readOnly) {
+            document.getElementById('l-modal-title').innerText = "檢視維修紀錄";
+            if(btnDel) btnDel.classList.add('hidden');
+            if(btnSave) btnSave.classList.add('hidden');
+            inputs.forEach(el => el.disabled = true);
+            document.getElementById('urgency-rating').style.pointerEvents = 'none';
+            document.getElementById('btn-log-open').style.pointerEvents = 'none';
+            document.getElementById('btn-log-closed').style.pointerEvents = 'none';
+        } else {
+            if(btnSave) btnSave.classList.remove('hidden');
+            inputs.forEach(el => el.disabled = false);
+            document.getElementById('urgency-rating').style.pointerEvents = 'auto';
+            document.getElementById('btn-log-open').style.pointerEvents = 'auto';
+            document.getElementById('btn-log-closed').style.pointerEvents = 'auto';
+        }
+
         if (id) {
-            document.getElementById('l-modal-title').innerText = "編輯維修紀錄";
-            if (btnDel) btnDel.classList.remove('hidden');
+            if (!readOnly) document.getElementById('l-modal-title').innerText = "編輯維修紀錄";
+            if (!readOnly && btnDel) btnDel.classList.remove('hidden');
             const log = this.data.logs.find(x => x.Log_ID === id);
             inputs.forEach(el => {
                 const key = el.id.replace('Log_', ''); 
@@ -1223,7 +1242,7 @@ const app = {
             document.getElementById('Log_ID').value = this.generateId('LOG');
             document.getElementById('Date_Reported').value = this.formatDateForInput(new Date());
             this.setLogFormStatus('Open');
-            this.setUrgency(3); // 預設 3 把火
+            this.setUrgency(3); 
         }
         if (modal) modal.classList.remove('hidden');
     },
@@ -1269,8 +1288,7 @@ const app = {
         });
 
         if (!payload.Instrument_ID) { alert("請選擇儀器"); return; }
-        // ★ 修正此處：把 Problem_Desc 改為 Description，對應 HTML 的 ID
-        if (!payload.Description) { alert("請填寫問題描述"); return; }
+        if (!payload.Problem_Desc) { alert("請填寫問題描述"); return; }
 
         const btn = document.getElementById('btn-save-l');
         btn.innerText = "儲存中...";

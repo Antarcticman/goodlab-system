@@ -85,6 +85,7 @@
                         <div class="filters">
                             <input type="text" id="search-log" placeholder="搜尋問題..." oninput="app.renderLogs()">
                             <div class="filter-group">
+                                <button class="btn-filter filter-chip" data-val="All" onclick="app.setLogFilter('All')">全部</button>
                                 <button class="btn-filter filter-chip active" data-val="Open" onclick="app.setLogFilter('Open')">待處理</button>
                                 <button class="btn-filter filter-chip" data-val="Closed" onclick="app.setLogFilter('Closed')">已結案</button>
                             </div>
@@ -141,6 +142,7 @@
                             <input type="text" id="search-acc" placeholder="搜尋項目..." oninput="app.renderAccounting()">
                             <div class="filter-group">
                                 <button class="btn-filter filter-chip active" data-acc-val="All" onclick="app.setAccFilter('All')">全部</button>
+                                <button class="btn-filter filter-chip" data-acc-val="Wait" onclick="app.setAccFilter('Wait')">未回沖</button>
                                 <button class="btn-filter filter-chip" data-acc-val="Debt" onclick="app.setAccFilter('Debt')">未還款</button>
                             </div>
                         </div>
