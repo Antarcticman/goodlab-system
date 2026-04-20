@@ -758,16 +758,13 @@ const app = {
 
     // === 1. 儀器渲染 ===
     renderInstruments: function() {
-        const searchEl = document.getElementById('search-inst');
-        const term = searchEl ? searchEl.value.toLowerCase() : '';
-        // ★ 修復：正確抓取 HTML 中的 filter-inst-loc
-        const locFilterEl = document.getElementById('filter-inst-loc');
-        const locFilter = locFilterEl ? locFilterEl.value : '';
+        const term = document.getElementById('search-inst').value.toLowerCase();
+        const locFilter = document.getElementById('filter-inst-location').value;
         const isAdmin = this.currentRole === 'Admin';
 
         let filtered = this.data.instruments.filter(inst => {
-            const matchText = (inst.Name + (inst.Vendor_Info||"") + inst.Manager_ID).toLowerCase().includes(term);
-            const matchLoc = locFilter ? inst.Location === locFilter : true;
+            const matchText = (String(inst.Name || '') + String(inst.Instrument_ID || '')).toLowerCase().includes(term);
+            const matchLoc = (locFilter === "" || inst.Location === locFilter); // ★ 區域過濾判斷
             return matchText && matchLoc;
         });
 
@@ -1190,76 +1187,106 @@ const app = {
         }
     },
 
-    // ★ 參數新增 readOnly，預設為 false
-    openLogModal: function(id = null, readOnly = false) {
-        if (this.currentRole !== 'Admin' && !readOnly) return; // 允許所有人「檢視」
-        const modal = document.getElementById('log-modal');
-        const inputs = document.querySelectorAll('#log-modal input, #log-modal select, #log-modal textarea');
-        const btnDel = document.getElementById('btn-del-l');
-        const btnSave = document.getElementById('btn-save-l');
+    openLogModal: function(data = null) {
+        const modalId = 'log-modal';
+        const title = data ? '編輯維修紀錄' : '回報維修問題';
+        const isAdmin = this.currentRole === 'Admin';
         
-        this.fillMemberSelect('Owner_ID');
+        // 初始化區域選單 (對應你的 HTML ID: Log_Location_Filter)
         const locSelect = document.getElementById('Log_Location_Filter');
-        if(locSelect) {
-            const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean);
-            locSelect.innerHTML = '<option value="">請選擇...</option>' + locations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
-        }
-        inputs.forEach(el => el.value = '');
+        const areas = ["多腔體區", "機房", "製程區", "黃光室", "量測區", "辦公區", "頂樓", "其他"];
+        locSelect.innerHTML = '<option value="">選擇區域...</option>' + 
+            areas.map(a => `<option value="${a}">${a}</option>`).join('');
 
-        // --- 純檢視模式 vs 編輯模式的 UI 切換 ---
-        if (readOnly) {
-            document.getElementById('l-modal-title').innerText = "檢視維修紀錄";
-            if(btnDel) btnDel.classList.add('hidden');
-            if(btnSave) btnSave.classList.add('hidden');
-            inputs.forEach(el => el.disabled = true);
-            document.getElementById('urgency-rating').style.pointerEvents = 'none';
-            document.getElementById('btn-log-open').style.pointerEvents = 'none';
-            document.getElementById('btn-log-closed').style.pointerEvents = 'none';
-        } else {
-            if(btnSave) btnSave.classList.remove('hidden');
-            inputs.forEach(el => el.disabled = false);
-            document.getElementById('urgency-rating').style.pointerEvents = 'auto';
-            document.getElementById('btn-log-open').style.pointerEvents = 'auto';
-            document.getElementById('btn-log-closed').style.pointerEvents = 'auto';
-        }
+        // 判斷是否為鎖定狀態
+        const isLocked = data && data.Status === 'Closed' && !isAdmin;
 
-        if (id) {
-            if (!readOnly) document.getElementById('l-modal-title').innerText = "編輯維修紀錄";
-            if (!readOnly && btnDel) btnDel.classList.remove('hidden');
-            const log = this.data.logs.find(x => x.Log_ID === id);
-            inputs.forEach(el => {
-                const key = el.id.replace('Log_', ''); 
-                if (log[el.id] !== undefined) el.value = log[el.id]; 
-                if (log[key] !== undefined) el.value = log[key]; 
-                if (el.type === 'date') el.value = this.formatDateForInput(log[el.id] || log[key]);
-            });
-            document.getElementById('Log_ID').value = id;
-            this.setLogFormStatus(log.Status || 'Open');
-            this.setUrgency(log.Urgency || 3);
+        if (data) {
+            // 編輯模式：填入舊資料
+            document.getElementById('Log_ID').value = data.Log_ID;
+            document.getElementById('Problem_Desc').value = data.Problem_Desc || '';
+            document.getElementById('Solution').value = data.Solution || '';
+            document.getElementById('Log_Status').value = data.Status || 'Open';
+            
+            // 還原火焰數量
+            this.setUrgency(data.Urgency || 3);
+
+            // ★ 反查機制：因為 Log 資料庫沒存地點，所以拿儀器 ID 去找地點
+            let instLoc = '';
+            const inst = this.data.instruments.find(i => i.Instrument_ID === data.Instrument_ID);
+            if (inst) instLoc = inst.Location;
+            
+            locSelect.value = instLoc;
+
+            // ★ 觸發過濾器，並帶入地點與儀器 ID
+            this.filterLogInstruments(instLoc, data.Instrument_ID);
         } else {
-            document.getElementById('l-modal-title').innerText = "回報問題";
-            if (btnDel) btnDel.classList.add('hidden');
+            // 新增模式：清空所有欄位
             document.getElementById('Log_ID').value = this.generateId('LOG');
-            document.getElementById('Date_Reported').value = this.formatDateForInput(new Date());
-            this.setLogFormStatus('Open');
-            this.setUrgency(3); 
+            locSelect.value = '';
+            document.getElementById('Problem_Desc').value = '';
+            document.getElementById('Solution').value = '';
+            document.getElementById('Log_Status').value = 'Open';
+            
+            // 預設 3 把火
+            this.setUrgency(3);
+            
+            // 清空儀器選單
+            this.filterLogInstruments('', '');
         }
-        if (modal) modal.classList.remove('hidden');
+
+        // ==========================================
+        // 權限防呆鎖定 (Security & UI Locks)
+        // ==========================================
+        locSelect.disabled = isLocked;
+        document.getElementById('Log_Instrument_ID').disabled = isLocked;
+        document.getElementById('Problem_Desc').readOnly = isLocked;
+        
+        // 只有 Admin 或未結案時能改狀態跟寫解決方案
+        document.getElementById('Log_Status').disabled = !isAdmin; 
+        const canEditSolution = isAdmin || (data && data.Status !== 'Closed');
+        document.getElementById('Solution').readOnly = !canEditSolution;
+
+        // ★ 修復：正確鎖定「火焰圖示」，讓它無法被點擊
+        const urgencyDiv = document.getElementById('urgency-rating');
+        if (urgencyDiv) {
+            urgencyDiv.style.pointerEvents = isLocked ? 'none' : 'auto';
+            urgencyDiv.style.opacity = isLocked ? '0.6' : '1';
+        }
+
+        // 隱藏儲存按鈕
+        const saveBtn = document.getElementById('btn-save-l');
+        if (saveBtn) saveBtn.style.display = isLocked ? 'none' : 'block';
+
+        UI.openModal({ modalId, title });
     },
 
-    filterLogInstruments: function() {
-        const loc = document.getElementById('Log_Location_Filter').value;
+    filterLogInstruments: function(targetArea = null, targetInstId = null) {
+        const locSelect = document.getElementById('Log_Location_Filter');
         const instSelect = document.getElementById('Log_Instrument_ID');
+
+        // 如果有傳入 targetArea (開窗時)，優先使用；否則抓畫面上的值 (onchange 時)
+        const loc = targetArea !== null ? targetArea : locSelect.value;
         
         if (!loc) {
-            instSelect.innerHTML = '<option value="">請先選擇地點</option>';
+            instSelect.innerHTML = '<option value="">請先選擇實驗區域...</option>';
             return;
         }
 
-        const filteredInsts = this.data.instruments.filter(i => i.Location === loc);
-        instSelect.innerHTML = filteredInsts.map(i => 
-            `<option value="${i.Instrument_ID}">${i.Name}</option>`
-        ).join('');
+        // 過濾出該區域「未報廢」的儀器
+        const filteredInsts = this.data.instruments.filter(i => i.Is_Active && i.Location === loc);
+        
+        if (filteredInsts.length === 0) {
+            instSelect.innerHTML = '<option value="">該區域無設備...</option>';
+        } else {
+            instSelect.innerHTML = '<option value="">請選擇故障儀器...</option>' + 
+                filteredInsts.map(i => `<option value="${i.Instrument_ID}">${i.Name}</option>`).join('');
+        }
+
+        // 如果有指定特定的儀器 (編輯模式)，則自動選取它
+        if (targetInstId) {
+            instSelect.value = targetInstId;
+        }
     },
 
     setupLogAutoStatus: function() {

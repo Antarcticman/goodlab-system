@@ -59,7 +59,16 @@
                     <div class="action-bar">
                         <div class="filters">
                             <input type="text" id="search-inst" placeholder="搜尋儀器名稱..." oninput="app.renderInstruments()">
-                            <select id="filter-inst-loc" onchange="app.renderInstruments()"><option value="">所有區域</option></select>
+                            <select id="filter-inst-location" onchange="app.renderInstruments()">
+                                <option value="">所有區域</option>
+                                <option value="多腔體區">多腔體區</option>
+                                <option value="機房">機房</option>
+                                <option value="製程區">製程區</option>
+                                <option value="黃光室">黃光室</option>
+                                <option value="量測區">量測區</option>
+                                <option value="辦公區">辦公區</option>
+                                <option value="頂樓">頂樓</option>
+                            </select>
                         </div>
                         <button onclick="app.openInstModal()" class="btn btn-primary admin-only">新增儀器</button>
                     </div>
