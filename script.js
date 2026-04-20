@@ -1187,12 +1187,19 @@ const app = {
         }
     },
 
-    openLogModal: function(data = null) {
+    openLogModal: function(inputData = null) {
         const modalId = 'log-modal';
-        const title = data ? '編輯維修紀錄' : '回報維修問題';
+        const title = inputData ? '編輯維修紀錄' : '回報維修問題';
         const isAdmin = this.currentRole === 'Admin';
         
-        // 初始化區域選單 (對應你的 HTML ID: Log_Location_Filter)
+        // 1. 取得真正的資料物件 (如果是 ID 字串就去資料庫撈)
+        let data = inputData;
+        if (typeof inputData === 'string') {
+            data = this.data.logs.find(l => l.Log_ID === inputData);
+        }
+
+        // 2. 初始化下拉選單
+        this.fillMemberSelect('Owner_ID'); // 補回回報人名單
         const locSelect = document.getElementById('Log_Location_Filter');
         const areas = ["多腔體區", "機房", "製程區", "黃光室", "量測區", "辦公區", "頂樓", "其他"];
         locSelect.innerHTML = '<option value="">選擇區域...</option>' + 
@@ -1202,61 +1209,76 @@ const app = {
         const isLocked = data && data.Status === 'Closed' && !isAdmin;
 
         if (data) {
-            // 編輯模式：填入舊資料
+            // === 編輯模式：精確填入所有欄位 ===
             document.getElementById('Log_ID').value = data.Log_ID;
             document.getElementById('Problem_Desc').value = data.Problem_Desc || '';
             document.getElementById('Solution').value = data.Solution || '';
-            document.getElementById('Log_Status').value = data.Status || 'Open';
             
-            // 還原火焰數量
+            // 補回日期與回報人
+            document.getElementById('Date_Reported').value = this.formatDateForInput(data.Date_Reported);
+            document.getElementById('Owner_ID').value = data.Owner_ID || '';
+            document.getElementById('Date_Resolved').value = this.formatDateForInput(data.Date_Resolved);
+            
+            // 更新狀態按鈕與火焰數量
+            this.setLogFormStatus(data.Status || 'Open');
             this.setUrgency(data.Urgency || 3);
 
-            // ★ 反查機制：因為 Log 資料庫沒存地點，所以拿儀器 ID 去找地點
+            // 反查地點並過濾儀器
             let instLoc = '';
             const inst = this.data.instruments.find(i => i.Instrument_ID === data.Instrument_ID);
             if (inst) instLoc = inst.Location;
-            
             locSelect.value = instLoc;
-
-            // ★ 觸發過濾器，並帶入地點與儀器 ID
             this.filterLogInstruments(instLoc, data.Instrument_ID);
+
         } else {
-            // 新增模式：清空所有欄位
+            // === 新增模式：填入預設值 ===
             document.getElementById('Log_ID').value = this.generateId('LOG');
             locSelect.value = '';
             document.getElementById('Problem_Desc').value = '';
             document.getElementById('Solution').value = '';
-            document.getElementById('Log_Status').value = 'Open';
             
-            // 預設 3 把火
+            // ★ 補回預設日期：今天
+            document.getElementById('Date_Reported').value = this.formatDateForInput(new Date());
+            document.getElementById('Date_Resolved').value = '';
+            
+            // ★ 自動帶入目前登入者作為回報人
+            const currentMember = this.data.members.find(m => m.Google_UID === this.currentUser?.uid);
+            if (currentMember) {
+                document.getElementById('Owner_ID').value = currentMember.Student_ID;
+            } else {
+                document.getElementById('Owner_ID').value = '';
+            }
+            
+            this.setLogFormStatus('Open');
             this.setUrgency(3);
-            
-            // 清空儀器選單
             this.filterLogInstruments('', '');
         }
 
         // ==========================================
-        // 權限防呆鎖定 (Security & UI Locks)
+        // 權限防呆鎖定
         // ==========================================
         locSelect.disabled = isLocked;
         document.getElementById('Log_Instrument_ID').disabled = isLocked;
+        document.getElementById('Owner_ID').disabled = isLocked;
+        document.getElementById('Date_Reported').disabled = isLocked;
         document.getElementById('Problem_Desc').readOnly = isLocked;
         
-        // 只有 Admin 或未結案時能改狀態跟寫解決方案
         document.getElementById('Log_Status').disabled = !isAdmin; 
         const canEditSolution = isAdmin || (data && data.Status !== 'Closed');
         document.getElementById('Solution').readOnly = !canEditSolution;
+        document.getElementById('Date_Resolved').disabled = !canEditSolution;
 
-        // ★ 修復：正確鎖定「火焰圖示」，讓它無法被點擊
         const urgencyDiv = document.getElementById('urgency-rating');
         if (urgencyDiv) {
             urgencyDiv.style.pointerEvents = isLocked ? 'none' : 'auto';
             urgencyDiv.style.opacity = isLocked ? '0.6' : '1';
         }
 
-        // 隱藏儲存按鈕
         const saveBtn = document.getElementById('btn-save-l');
         if (saveBtn) saveBtn.style.display = isLocked ? 'none' : 'block';
+
+        const delBtn = document.getElementById('btn-del-l');
+        if (delBtn) delBtn.style.display = (data && isAdmin) ? 'block' : 'none';
 
         UI.openModal({ modalId, title });
     },
