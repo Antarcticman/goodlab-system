@@ -319,8 +319,22 @@ const app = {
     fillMemberSelect: function(selectId) {
         const select = document.getElementById(selectId);
         if (!select) return;
-        const options = this.data.members.filter(m => m.Status === 'Active').map(m => `<option value="${m.Student_ID}">${m.Name_Ch}</option>`).join('');
-        select.innerHTML = '<option value="">(請選擇)</option>' + options;
+
+        // 檢查資料是否存在
+        if (!this.data.members || this.data.members.length === 0) {
+            select.innerHTML = '<option value="">(讀取中或無成員資料)</option>';
+            return;
+        }
+
+        // 篩選「在校」人員，若無符合者則顯示所有成員 (避免篩選條件衝突導致選單全空)
+        let activeMembers = this.data.members.filter(m => m.Status === 'Active');
+        if (activeMembers.length === 0) activeMembers = this.data.members;
+
+        const options = activeMembers.map(m => 
+            `<option value="${m.Student_ID}">${m.Name_Ch} (${m.Student_ID})</option>`
+        ).join('');
+
+        select.innerHTML = '<option value="">(請選擇人員)</option>' + options;
     },
 
     fillPayerSelect: function(selectId) {
@@ -1189,95 +1203,104 @@ const app = {
 
     openLogModal: function(inputData = null) {
         const modalId = 'log-modal';
-        const title = inputData ? '編輯維修紀錄' : '回報維修問題';
         const isAdmin = this.currentRole === 'Admin';
         
-        // 1. 取得真正的資料物件 (如果是 ID 字串就去資料庫撈)
-        let data = inputData;
+        // 1. 強制識別資料來源
+        let data = null;
         if (typeof inputData === 'string') {
-            data = this.data.logs.find(l => l.Log_ID === inputData);
+            // 如果傳入的是 ID 字串，加強比對邏輯 (同時比對 Log_ID 與 Firestore id)
+            data = this.data.logs.find(l => (l.Log_ID === inputData || l.id === inputData));
+            if (!data) {
+                console.error("找不到對應的維修紀錄 ID:", inputData);
+                this.showNotification("❌ 找不到該筆紀錄，請重新整理頁面。", "error");
+                return;
+            }
+        } else if (inputData && typeof inputData === 'object') {
+            data = inputData;
         }
 
-        // 2. 初始化下拉選單
-        this.fillMemberSelect('Owner_ID'); // 補回回報人名單
+        const title = data ? '編輯維修紀錄' : '回報維修問題';
+
+        // 2. 初始化所有下拉選單 (人員、區域)
+        this.fillMemberSelect('Owner_ID'); 
+        
         const locSelect = document.getElementById('Log_Location_Filter');
         const areas = ["多腔體區", "機房", "製程區", "黃光室", "量測區", "辦公區", "頂樓", "其他"];
-        locSelect.innerHTML = '<option value="">選擇區域...</option>' + 
+        locSelect.innerHTML = '<option value="">(選擇區域)</option>' + 
             areas.map(a => `<option value="${a}">${a}</option>`).join('');
 
-        // 判斷是否為鎖定狀態
-        const isLocked = data && data.Status === 'Closed' && !isAdmin;
-
+        // 3. 根據有無資料進行填值 (Data Binding)
         if (data) {
-            // === 編輯模式：精確填入所有欄位 ===
-            document.getElementById('Log_ID').value = data.Log_ID;
+            // === 編輯模式 ===
+            document.getElementById('Log_ID').value = data.Log_ID || data.id || '';
             document.getElementById('Problem_Desc').value = data.Problem_Desc || '';
             document.getElementById('Solution').value = data.Solution || '';
-            
-            // 補回日期與回報人
             document.getElementById('Date_Reported').value = this.formatDateForInput(data.Date_Reported);
-            document.getElementById('Owner_ID').value = data.Owner_ID || '';
             document.getElementById('Date_Resolved').value = this.formatDateForInput(data.Date_Resolved);
             
-            // 更新狀態按鈕與火焰數量
+            // 下拉選單填值 (回報人)
+            const ownerSelect = document.getElementById('Owner_ID');
+            ownerSelect.value = data.Owner_ID || '';
+
+            // 更新 UI 狀態按鈕與緊急度
             this.setLogFormStatus(data.Status || 'Open');
             this.setUrgency(data.Urgency || 3);
 
-            // 反查地點並過濾儀器
+            // 重要：反查儀器地點並載入儀器選單
             let instLoc = '';
             const inst = this.data.instruments.find(i => i.Instrument_ID === data.Instrument_ID);
             if (inst) instLoc = inst.Location;
+            
             locSelect.value = instLoc;
             this.filterLogInstruments(instLoc, data.Instrument_ID);
 
         } else {
-            // === 新增模式：填入預設值 ===
+            // === 新增模式 ===
             document.getElementById('Log_ID').value = this.generateId('LOG');
-            locSelect.value = '';
             document.getElementById('Problem_Desc').value = '';
             document.getElementById('Solution').value = '';
-            
-            // ★ 補回預設日期：今天
             document.getElementById('Date_Reported').value = this.formatDateForInput(new Date());
             document.getElementById('Date_Resolved').value = '';
             
-            // ★ 自動帶入目前登入者作為回報人
+            // 自動帶入當前登入者
             const currentMember = this.data.members.find(m => m.Google_UID === this.currentUser?.uid);
-            if (currentMember) {
-                document.getElementById('Owner_ID').value = currentMember.Student_ID;
-            } else {
-                document.getElementById('Owner_ID').value = '';
-            }
+            document.getElementById('Owner_ID').value = currentMember ? currentMember.Student_ID : '';
             
             this.setLogFormStatus('Open');
             this.setUrgency(3);
+            locSelect.value = '';
             this.filterLogInstruments('', '');
         }
 
-        // ==========================================
-        // 權限防呆鎖定
-        // ==========================================
-        locSelect.disabled = isLocked;
-        document.getElementById('Log_Instrument_ID').disabled = isLocked;
-        document.getElementById('Owner_ID').disabled = isLocked;
-        document.getElementById('Date_Reported').disabled = isLocked;
-        document.getElementById('Problem_Desc').readOnly = isLocked;
+        // 4. 權限與鎖定邏輯 (修正 Readonly 衝突)
+        const isLocked = data && data.Status === 'Closed' && !isAdmin;
         
-        document.getElementById('Log_Status').disabled = !isAdmin; 
+        const fields = ['Log_Location_Filter', 'Log_Instrument_ID', 'Owner_ID', 'Date_Reported', 'Problem_Desc'];
+        fields.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (el.tagName === 'SELECT' || el.type === 'date') el.disabled = isLocked;
+                else el.readOnly = isLocked;
+            }
+        });
+
+        // 結案欄位權限
         const canEditSolution = isAdmin || (data && data.Status !== 'Closed');
         document.getElementById('Solution').readOnly = !canEditSolution;
         document.getElementById('Date_Resolved').disabled = !canEditSolution;
+        document.getElementById('Log_Status').disabled = !isAdmin;
 
+        // 火焰圖示點擊鎖定
         const urgencyDiv = document.getElementById('urgency-rating');
         if (urgencyDiv) {
             urgencyDiv.style.pointerEvents = isLocked ? 'none' : 'auto';
             urgencyDiv.style.opacity = isLocked ? '0.6' : '1';
         }
 
+        // 按鈕顯示隱藏
         const saveBtn = document.getElementById('btn-save-l');
-        if (saveBtn) saveBtn.style.display = isLocked ? 'none' : 'block';
-
         const delBtn = document.getElementById('btn-del-l');
+        if (saveBtn) saveBtn.style.display = isLocked ? 'none' : 'block';
         if (delBtn) delBtn.style.display = (data && isAdmin) ? 'block' : 'none';
 
         UI.openModal({ modalId, title });
