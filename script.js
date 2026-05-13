@@ -89,27 +89,32 @@ const app = {
         }
     },
 
-    // === 側邊欄 UI 動態控制 ===
+    // === 側邊欄與手機 UI 動態控制 ===
     updateSidebarUI: function() {
-        const navBtns = {
-            'instruments': document.getElementById('nav-btn-instruments'),
-            'logs': document.getElementById('nav-btn-logs'),
-            'accounting': document.getElementById('nav-btn-accounting'),
-            'inventory': document.getElementById('nav-btn-inventory')
+        const navMap = {
+            // ★ 同時抓取「電腦版 ID」與「手機版 onclick 屬性」的按鈕
+            'instruments': [document.getElementById('nav-btn-instruments'), document.querySelector('.mobile-nav-item[onclick*="instruments"]')],
+            'logs': [document.getElementById('nav-btn-logs'), document.querySelector('.mobile-nav-item[onclick*="logs"]')],
+            'accounting': [document.getElementById('nav-btn-accounting'), document.querySelector('.mobile-nav-item[onclick*="accounting"]')],
+            'inventory': [document.getElementById('nav-btn-inventory'), document.querySelector('.mobile-nav-item[onclick*="inventory"]')]
         };
 
-        // 預設全部隱藏
-        Object.values(navBtns).forEach(el => { if(el) el.style.display = 'none'; });
+        // 預設：全部物理隱藏 (display: none)
+        Object.values(navMap).forEach(arr => { 
+            arr.forEach(el => { if(el) el.style.display = 'none'; }); 
+        });
 
         if (this.currentRole === 'Admin') {
-            // Admin：看得到所有按鈕
-            Object.values(navBtns).forEach(el => { if(el) el.style.display = 'flex'; });
+            // Admin：全部按鈕解鎖
+            Object.values(navMap).forEach(arr => { 
+                arr.forEach(el => { if(el) el.style.display = 'flex'; }); 
+            });
         } else if (this.currentRole === 'User') {
-            // User：只能看到 儀器、產編 (看不到維修與公積金)
-            if(navBtns.instruments) navBtns.instruments.style.display = 'flex';
-            if(navBtns.inventory) navBtns.inventory.style.display = 'flex';
+            // User：只能看到「儀器」與「產編」
+            navMap['instruments'].forEach(el => { if(el) el.style.display = 'flex'; });
+            navMap['inventory'].forEach(el => { if(el) el.style.display = 'flex'; });
         }
-        // Guest：維持全部隱藏，畫面上只剩下「人員管理」
+        // Guest：什麼都不做，畫面上只會剩下預設顯示的「人員管理」
     },
 
     // ================= 頁面說明文案庫 (SOP) =================
@@ -429,6 +434,10 @@ const app = {
 
     // === 頁面與側邊欄切換邏輯 (SaaS 新版) ===
     switchTab: function(tabId) {
+        // ★ 終極防線：如果不符合身分，連切換畫面的動作都不允許執行
+        if (this.currentRole === 'Guest' && tabId !== 'members') return;
+        if (this.currentRole === 'User' && (tabId === 'logs' || tabId === 'accounting')) return;
+
         // 1. 切換主內容區的顯示 (隱藏所有，顯示目標)
         document.querySelectorAll('.page-section').forEach(s => {
             s.classList.remove('active');
@@ -440,7 +449,6 @@ const app = {
 
         // 2. 更新電腦版「側邊欄」的發亮狀態
         document.querySelectorAll('.nav-item').forEach(btn => {
-            // 利用 onclick 屬性來判斷按鈕歸屬，防呆不報錯
             const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId);
             btn.classList.toggle('active', isMatch);
         });
@@ -469,7 +477,6 @@ const app = {
         if (tabId === 'instruments' && typeof this.renderInstruments === 'function') this.renderInstruments();
         if (tabId === 'logs' && typeof this.renderLogs === 'function') this.renderLogs();
         if (tabId === 'accounting' && typeof this.renderAccounting === 'function') this.renderAccounting();
-        // 如果你有 renderMembers，這裡也會安全呼叫
         if (tabId === 'members' && typeof this.renderMembers === 'function') this.renderMembers();
     },
 
@@ -562,13 +569,21 @@ const app = {
 
     renderAccounting: function() {
         const tbody = document.getElementById('acc-tbody');
+        const dashboard = document.querySelector('.dashboard-cards');
         if(!tbody) return;
-        if (this.currentRole === 'Guest') {
+
+        // ★ 防火牆：非 Admin 進入時，蓋上鎖頭並隱藏上方的金錢儀表板
+        if (this.currentRole !== 'Admin') {
             tbody.innerHTML = this.guestGuardHtml;
+            if (dashboard) dashboard.style.display = 'none'; 
             return;
         }
+
+        // Admin 進入時，顯示儀表板
+        if (dashboard) dashboard.style.display = 'grid'; 
+
         const searchEl = document.getElementById('search-acc');
-        const term = searchEl ? searchEl.value.toLowerCase() : ''; // ★ 安全防呆
+        const term = searchEl ? searchEl.value.toLowerCase() : ''; 
         const filter = this.accFilterStatus;
 
         let filtered = this.data.accounting.filter(acc => {
@@ -597,7 +612,6 @@ const app = {
             const datePayback = isFund ? `<span class="date-empty">-</span>` : (acc.Payback_Date ? this.formatDateForInput(acc.Payback_Date) : `<span style="color:#dc3545">未還款</span>`);
             const showRecharge = (acc.Type === 'Lab' || acc.Type === 'Deposit') ? '<span class="date-empty">-</span>' : dateRecharge;
 
-            // ★ 加上 hide-mobile 配合 HTML 的簡化，並加入 mobile-truncate
             return `
             <tr onclick="app.openAccModal('${acc.Txn_ID}')" style="cursor:pointer">
                 <td style="text-align:center; font-size:1.2rem;">${statusIcon}</td>
@@ -1165,8 +1179,8 @@ const app = {
         const tbody = document.getElementById('log-tbody');
         if (!tbody) return;
 
-        // ★ 加入防火牆攔截
-        if (this.currentRole === 'Guest') {
+        // ★ 加入防火牆攔截：User 與 Guest 都不能看維修紀錄
+        if (this.currentRole !== 'Admin') {
             tbody.innerHTML = this.guestGuardHtml;
             return;
         }
