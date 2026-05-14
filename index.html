@@ -204,6 +204,7 @@
                         <div style="display:flex; gap:10px;">
                             <input type="file" id="excel-upload" accept=".xlsx, .xls" style="display: none;" onchange="app.previewExcel(event)">
                             <button onclick="document.getElementById('excel-upload').click()" class="btn btn-secondary admin-only"><i class="ph ph-upload-simple"></i> 匯入</button>
+                            <button onclick="app.exportInventoryExcel()" class="btn btn-secondary admin-only" style="color: var(--success); border-color: var(--success);"><i class="ph ph-download-simple"></i> 匯出清冊</button>
                         </div>
                     </div>
                     <div class="table-container">

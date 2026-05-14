@@ -495,7 +495,7 @@ const app = {
         });
     },
 
-    // 計算儀表板數字
+    // === 計算儀表板數字 (相容舊資料版) ===
     calcDashboard: function() {
         let bankBalance = 0; // 戶頭
         let cashBalance = 0; // 現金
@@ -504,42 +504,47 @@ const app = {
 
         this.data.accounting.forEach(acc => {
             const amt = Math.abs(parseFloat(acc.Amount) || 0);
-            const isFund = acc.Payer === 'Fund';
+            const type = acc.Type;
+            const payer = acc.Payer;
+            // 舊資料沒有分戶頭/現金，預設全部視為放在銀行
+            const source = acc.Fund_Source || 'Bank'; 
+
+            const isFund = (payer === 'Fund');
             const isRecharged = !!acc.Recharge_Date;
             const isPaidBack = !!acc.Payback_Date;
-            const source = acc.Fund_Source || 'Bank'; // 這筆交易動用的是 Bank 還是 Cash
 
             // --- 狀態統計 ---
-            if (!isFund && !isPaidBack) payable += amt;
-            if (acc.Type === 'School' && !isRecharged) receivable += amt;
+            if (!isFund && !isPaidBack && (type === 'School' || type === 'Lab')) {
+                payable += amt;
+            }
+            if (type === 'School' && !isRecharged) {
+                receivable += amt;
+            }
 
-            // --- 餘額計算 ---
-            if (acc.Type === 'Deposit') {
-                bankBalance += amt; // 老師匯錢通常直接進戶頭
+            // --- 餘額計算 (★ 關鍵修復：加入 Deposit 與 Withdrawal 支援) ---
+            if (type === 'Income' || type === 'Deposit') {
+                if (source === 'Cash') cashBalance += amt;
+                else bankBalance += amt;
             } 
-            else if (acc.Type === 'Withdrawal') {
-                bankBalance -= amt; // 戶頭減少
-                cashBalance += amt; // 現金增加
+            else if (type === 'Withdraw' || type === 'Withdrawal') {
+                bankBalance -= amt; 
+                cashBalance += amt; 
             } 
-            else if (acc.Type === 'School' || acc.Type === 'Lab') {
-                // 如果是公積金付錢 (或是已經還錢給代墊學生)
+            else if (type === 'School' || type === 'Lab') {
                 if (isFund || (!isFund && isPaidBack)) {
                     if (source === 'Cash') cashBalance -= amt;
                     else bankBalance -= amt;
                 }
-                // 學校回沖的錢，一律進戶頭
-                if (acc.Type === 'School' && isRecharged) {
+                if (type === 'School' && isRecharged) {
                     bankBalance += amt;
                 }
             }
         });
 
-        // 更新 UI
         const totalBalance = bankBalance + cashBalance;
         document.getElementById('val-balance').innerText = "$" + totalBalance.toLocaleString();
         document.getElementById('val-bank').innerText = "$" + bankBalance.toLocaleString();
         document.getElementById('val-cash').innerText = "$" + cashBalance.toLocaleString();
-        
         document.getElementById('val-payable').innerText = "$" + payable.toLocaleString();
         document.getElementById('val-receivable').innerText = "$" + receivable.toLocaleString();
     },
@@ -610,7 +615,7 @@ const app = {
             
             const dateRecharge = acc.Recharge_Date ? this.formatDateForInput(acc.Recharge_Date) : `<span class="date-empty">等待</span>`;
             const datePayback = isFund ? `<span class="date-empty">-</span>` : (acc.Payback_Date ? this.formatDateForInput(acc.Payback_Date) : `<span style="color:#dc3545">未還款</span>`);
-            const showRecharge = (acc.Type === 'Lab' || acc.Type === 'Deposit') ? '<span class="date-empty">-</span>' : dateRecharge;
+            const showRecharge = (acc.Type !== 'School') ? '<span class="date-empty">-</span>' : dateRecharge;
 
             return `
             <tr onclick="app.openAccModal('${acc.Txn_ID}')" style="cursor:pointer">
@@ -628,12 +633,11 @@ const app = {
         }).join('');
     },
 
-    // 輔助：取得中文類型
     getAccTypeName: function(type) {
         if(type === 'School') return '<i class="ph ph-buildings"></i> 報帳';
         if(type === 'Lab') return '<i class="ph ph-flask"></i> 內帳';
-        if(type === 'Deposit') return '<i class="ph ph-download-simple"></i> 匯入';
-        if(type === 'Withdrawal') return '<i class="ph ph-money"></i> 提款';
+        if(type === 'Income' || type === 'Deposit') return '<i class="ph ph-download-simple"></i> 匯入';
+        if(type === 'Withdraw' || type === 'Withdrawal') return '<i class="ph ph-money"></i> 提款';
         return type;
     },
 
@@ -698,7 +702,7 @@ const app = {
         }
     },
 
-    // UI 連動：類型改變時
+    // === UI 連動：類型改變時 ===
     handleAccTypeChange: function() {
         const type = document.getElementById('Acc_Type').value;
         const divRecharge = document.getElementById('grp-recharge');
@@ -708,12 +712,13 @@ const app = {
         // 只有 School 需要回沖日期
         divRecharge.style.visibility = (type === 'School') ? 'visible' : 'hidden';
 
-        // ★ 自動化防呆：提款或匯入時，自動填寫名稱並鎖定
-        if (type === 'Withdrawal') {
+        // ★ 自動化防呆：提款或匯入時，自動填寫名稱
+        if (type === 'Withdraw') {
             descInput.value = "🏧 銀行提款";
             this.setFundSource('Bank');
-        } else if (type === 'Deposit') {
+        } else if (type === 'Income') {
             descInput.value = "💰 匯入公積金";
+            // Income 不強制設為 Bank，讓 User 可以自己選 Bank 或 Cash
         } else {
             // 切換回報帳/內帳時，清空預設字
             if(descInput.value === "🏧 銀行提款" || descInput.value === "💰 匯入公積金") {
@@ -721,32 +726,37 @@ const app = {
             }
         }
 
-        // 如果是提款或匯入，強制 Payer 鎖定為 Fund
-        if (type === 'Withdrawal' || type === 'Deposit') {
+        // ★ 核心修復：提款或匯入，強制 Payer 鎖定為 Fund (公積金)
+        if (type === 'Withdraw' || type === 'Income') {
             payerSelect.value = 'Fund';
             payerSelect.disabled = true;
         } else {
             payerSelect.disabled = false;
         }
+        
         this.handleAccPayerChange(); 
     },
 
+    // === UI 連動：代墊人改變時 ===
     handleAccPayerChange: function() {
         const payer = document.getElementById('Acc_Payer').value;
         const type = document.getElementById('Acc_Type').value;
         const divPayback = document.getElementById('grp-payback');
         const divFundSource = document.getElementById('grp-fund-source');
 
-        // ★ 改用 display 來動態切換，讓兩者完美共用同一格空間
-        if (payer === 'Fund' || type === 'Deposit' || type === 'Withdrawal') {
+        // 還款日期：只有在代墊人不是 Fund 且「不是匯入/提款」時才顯示
+        if (payer === 'Fund' || type === 'Income' || type === 'Withdraw') {
             divPayback.style.display = 'none';
         } else {
             divPayback.style.display = 'flex';
         }
 
-        if (type === 'Deposit' || type === 'Withdrawal') {
+        // 資金來源 (戶頭/現金) 顯示邏輯：
+        if (type === 'Withdraw') {
+            // 提款固定是 Bank -> Cash，不需要給 User 選
             divFundSource.style.display = 'none';
-        } else if (payer === 'Fund') {
+        } else if (type === 'Income' || payer === 'Fund') {
+            // 匯入(Income)，或由公積金直接扣款時，必須顯示讓 User 選 Bank 或 Cash
             divFundSource.style.display = 'flex';
         } else {
             divFundSource.style.display = 'none'; 
@@ -767,6 +777,12 @@ const app = {
         }
 
         const fundSourceVal = document.getElementById('Fund_Source').value || 'Bank';
+        
+        // ★ 強制防呆：如果是匯入或提款，直接從後端將代墊人鎖定為公積金 (Fund)
+        let finalPayer = document.getElementById('Acc_Payer').value;
+        if (type === 'Income' || type === 'Withdraw') {
+            finalPayer = 'Fund';
+        }
 
         const payload = {
             Txn_ID: document.getElementById('Txn_ID').value,
@@ -774,12 +790,11 @@ const app = {
             Date: document.getElementById('Acc_Date').value,
             Description: document.getElementById('Acc_Description').value,
             Amount: rawAmount,
-            Payer: document.getElementById('Acc_Payer').value,
+            Payer: finalPayer,
             Recharge_Date: document.getElementById('Recharge_Date').value,
             Payback_Date: document.getElementById('Payback_Date').value,
             Invoice_Link: document.getElementById('Invoice_Link').value,
             Remark: document.getElementById('Acc_Remark').value,
-            // ★ 新增這行：記錄是從戶頭還是現金扣款 (預設 Bank)
             Fund_Source: fundSourceVal
         };
 
@@ -790,11 +805,8 @@ const app = {
         btn.disabled = true;
 
         try {
-            // ★ Firebase 寫入語法
             await setDoc(doc(db, "accounting", payload.Txn_ID), payload);
-            
             this.closeModal('acc-modal');
-            // 注意：這裡把 this.fetchData(); 刪掉了！
         } catch (e) {
             this.showNotification("❌ 發生錯誤: " + e.message, 'error');
         } finally {
@@ -1768,7 +1780,7 @@ const app = {
 
     // ================= 產編清點與橋接邏輯 (最終版) =================
 
-    // === Excel 兩階段匯入：階段一 (預覽解析) ===
+    // === Excel 兩階段匯入：階段一 (智慧預覽解析) ===
     previewExcel: function(event) {
         const file = event.target.files[0];
         if (!file) return;
@@ -1780,17 +1792,28 @@ const app = {
                 const workbook = XLSX.read(data, { type: 'array' });
                 const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
 
-                // 跳過前 6 行合併儲存格，將第 7 行視為標題
-                const rows = XLSX.utils.sheet_to_json(firstSheet, { range: 6, defval: "" });
+                // ★ 智慧偵測標題列：掃描前 20 行，尋找「財物編號」在哪一行
+                const rawArray = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                let headerIndex = 0;
+                for (let i = 0; i < Math.min(rawArray.length, 20); i++) {
+                    if (rawArray[i] && rawArray[i].includes('財物編號')) {
+                        headerIndex = i;
+                        break;
+                    }
+                }
+
+                // 使用找到的正確標題列 (headerIndex) 開始解析為 JSON
+                const rows = XLSX.utils.sheet_to_json(firstSheet, { range: headerIndex, defval: "" });
 
                 const existingMap = new Map();
                 this.data.inventory.forEach(item => existingMap.set(item.Property_ID, item));
 
-                this.tempImportPayloads = []; // 清空暫存
+                this.tempImportPayloads = []; 
                 const tbody = document.getElementById('import-preview-tbody');
-                tbody.innerHTML = ''; // 清空表格
+                tbody.innerHTML = ''; 
 
                 rows.forEach(row => {
+                    // 如果這行沒有財物編號或校號，直接跳過
                     if (!row['財物編號'] || !row['校號']) return;
 
                     const propId = `${String(row['財物編號']).trim()}-${String(row['校號']).trim()}-${row['附件'] ? String(row['附件']).trim() : '00'}`;
@@ -1801,30 +1824,30 @@ const app = {
                         Name: row['財物名稱'] ? String(row['財物名稱']).trim() : '',
                         Brand: row['廠牌'] ? String(row['廠牌']).trim() : '',
                         Model: (row['型式'] || row['形式']) ? String(row['型式'] || row['形式']).trim() : '',
-                        Price: row['單價'] ? Number(row['單價']) : 0,
+                        Price: row['單價'] ? Number(String(row['單價']).replace(/,/g, '')) : 0,
                         Acquire_Date: row['取得日期'] ? String(row['取得日期']).trim() : '',
-                        Lifespan: row['年限'] ? String(row['年限']).trim() : ''
+                        Lifespan: row['年限'] ? String(row['年限']).trim() : '',
+                        Add_No: row['增加單號'] ? String(row['增加單號']).trim() : '',
+                        Manager: row['管理人'] ? String(row['管理人']).trim() : '',
+                        Original_Location: row['存置地點'] ? String(row['存置地點']).trim() : '',
+                        Category: row['分類'] ? String(row['分類']).trim() : '',
+                        Scrap_Status: row['報銷狀態'] ? String(row['報銷狀態']).trim() : '',
+                        System_Remark: row['保管組備註'] ? String(row['保管組備註']).trim() : '',
+                        
+                        // 處理盤點狀態與自訂區域
+                        Status: (row['已盤得\n請打v'] && String(row['已盤得\n請打v']).toLowerCase() === 'v') ? 'Checked' : 'Pending',
+                        Location: row['實驗區域'] ? String(row['實驗區域']).trim() : '', 
+                        Personal_Remark: row['細項位置'] ? String(row['細項位置']).trim() : '' 
                     };
 
-                    // 判斷是新增還是更新
-                    let actionText = '';
-                    let actionColor = '';
+                    // 若系統內已有紀錄，比對是否為新增或更新
+                    let actionText = '全新建立';
+                    let actionColor = 'var(--success)';
 
                     if (existingItem) {
-                        payload.Location = existingItem.Location || '';
-                        payload.Personal_Remark = existingItem.Personal_Remark || '';
-                        payload.Status = existingItem.Status || 'Pending';
-                        payload.Checked_By = existingItem.Checked_By || null;
-                        actionText = '更新 (保留客製區域)';
-                        actionColor = 'var(--secondary)';
-                    } else {
-                        payload.Location = '';
-                        payload.Personal_Remark = '';
-                        payload.Status = 'Pending';
-                        payload.Checked_By = null;
-                        actionText = '全新建立';
-                        actionColor = 'var(--success)';
-                    }
+                        actionText = '同步更新';
+                        actionColor = 'var(--primary)';
+                    } 
 
                     this.tempImportPayloads.push(payload);
 
@@ -1833,56 +1856,74 @@ const app = {
                     tr.innerHTML = `
                         <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-family: monospace;">${payload.Property_ID}</td>
                         <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color);">${payload.Name}</td>
-                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 0.85rem; color: var(--text-muted);">${payload.Brand} / ${payload.Model}</td>
-                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); color: ${actionColor}; font-weight: bold; font-size: 0.85rem;">${actionText}</td>
+                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-size: 0.85rem;">${payload.Location || payload.Original_Location || '-'}</td>
+                        <td style="padding: 6px 8px; border-bottom: 1px solid var(--border-color); font-weight: bold; color: ${actionColor}; font-size: 0.85rem;">${actionText}</td>
                     `;
                     tbody.appendChild(tr);
                 });
 
                 document.getElementById('preview-count').innerText = this.tempImportPayloads.length;
-                UI.openModal({ modalId: 'import-preview-modal', title: '確認匯入資料 (預覽)' });
+                UI.openModal({ modalId: 'import-preview-modal', title: '全量同步預覽 (將刪除不在清單內的項目)' });
 
             } catch (error) {
                 console.error("Excel 解析失敗:", error);
                 this.showNotification("檔案解析失敗，請確認是否為符合格式的 Excel 檔。", 'error');
             } finally {
-                event.target.value = ''; // 允許重複上傳
+                event.target.value = ''; // 清空 input 檔案，讓下次選同一個檔案也能觸發
             }
         };
         reader.readAsArrayBuffer(file);
     },
 
-    // === Excel 兩階段匯入：階段二 (確認寫入資料庫) ===
     confirmImport: async function() {
-        if (this.tempImportPayloads.length === 0) {
-            this.showNotification("沒有可寫入的資料！", 'warning');
-            return;
-        }
+        if (!this.tempImportPayloads || this.tempImportPayloads.length === 0) return;
 
         const btn = document.getElementById('btn-confirm-import');
-        btn.innerText = "寫入中...";
+        btn.innerText = "執行全量同步中...";
         btn.disabled = true;
 
         try {
-            const batch = writeBatch(db);
-            this.tempImportPayloads.forEach(payload => {
-                const docRef = doc(db, "inventory", payload.Property_ID);
-                batch.set(docRef, payload, { merge: true });
+            const batchArray = [];
+            let currentBatch = writeBatch(db);
+            let count = 0;
+
+            // 1. 找出要刪除的項目：資料庫有但 Excel 沒出現的
+            const importedIDs = new Set(this.tempImportPayloads.map(p => p.Property_ID));
+            const itemsToDelete = this.data.inventory.filter(item => 
+                item.Property_ID !== '_SETTINGS_' && !importedIDs.has(item.Property_ID)
+            );
+
+            // 執行刪除
+            itemsToDelete.forEach(item => {
+                currentBatch.delete(doc(db, "inventory", item.Property_ID));
+                count++;
+                if (count % 400 === 0) {
+                    batchArray.push(currentBatch.commit());
+                    currentBatch = writeBatch(db);
+                }
             });
 
-            await batch.commit();
-            
-            this.showNotification(`🎉 成功寫入 ${this.tempImportPayloads.length} 筆產編資料！`, 'success');
-            app.closeModal('import-preview-modal');
-            this.renderInventory();
+            // 2. 執行新增與更新
+            this.tempImportPayloads.forEach(payload => {
+                currentBatch.set(doc(db, "inventory", payload.Property_ID), payload, { merge: true });
+                count++;
+                if (count % 400 === 0) {
+                    batchArray.push(currentBatch.commit());
+                    currentBatch = writeBatch(db);
+                }
+            });
 
-        } catch (error) {
-            console.error("寫入 Firebase 失敗:", error);
-            this.showNotification("寫入失敗: " + error.message, 'error');
+            if (count % 400 !== 0) batchArray.push(currentBatch.commit());
+            await Promise.all(batchArray);
+
+            this.showNotification(`同步成功：更新/新增 ${this.tempImportPayloads.length} 筆，刪除 ${itemsToDelete.length} 筆。`, 'success');
+            app.closeModal('import-preview-modal');
+            this.tempImportPayloads = [];
+        } catch (e) {
+            this.showNotification("同步失敗: " + e.message, 'error');
         } finally {
             btn.innerText = "確認並寫入系統";
             btn.disabled = false;
-            this.tempImportPayloads = []; // 寫入完畢後清空暫存
         }
     },
 
@@ -2197,35 +2238,40 @@ const app = {
         UI.openModal({ modalId: 'inv-details-modal', title: '財產詳細資訊' });
     },
 
-    // === 5. Excel 匯出功能 ===
     exportInventoryExcel: function() {
-        if (this.data.inventory.length === 0) {
-            this.showNotification("目前沒有資料可以匯出！", "warning");
-            return;
-        }
-        const exportData = this.data.inventory.map(item => {
-            const parts = item.Property_ID.split('-');
-            return {
-                '財物編號': parts[0] || '',
-                '校號': parts[1] || '',
-                '附件': parts[2] || '',
-                '財物名稱': item.Name || '',
-                '廠牌': item.Brand || '',
-                '型式': item.Model || '',
-                '單價': item.Price || '',
-                '取得日期': item.Acquire_Date || '',
-                '年限': item.Lifespan || '',
-                '實驗區域(系統)': item.Location || '',
-                '細項備註(系統)': item.Personal_Remark || '',
-                '盤點狀態': item.Status === 'Checked' ? 'V' : '',
-                '盤點人': item.Checked_By ? this.getMemberName(item.Checked_By) : ''
-            };
-        });
+        if (this.data.inventory.length === 0) return;
+
+        const exportData = this.data.inventory
+            .filter(i => i.Property_ID !== '_SETTINGS_')
+            .map(item => {
+                const parts = (item.Property_ID || '').split('-');
+                return {
+                    '財物編號': parts[0] || '',
+                    '校號': parts[1] || '',
+                    '附件': parts[2] || '',
+                    '財物名稱': item.Name || '',
+                    '廠牌': item.Brand || '',
+                    '型式': item.Model || '',
+                    '單價': item.Price || '',
+                    '增加單號': item.Add_No || '',
+                    '取得日期': item.Acquire_Date || '',
+                    '年限': item.Lifespan || '',
+                    '管理人': item.Manager || '',
+                    '存置地點': item.Original_Location || '',
+                    '分類': item.Category || '',
+                    '報銷狀態': item.Scrap_Status || '',
+                    '保管組備註': item.System_Remark || '',
+                    '個人備註': '', // 依要求留空或填入舊備註
+                    '已盤得\n請打v': item.Status === 'Checked' ? 'v' : '',
+                    '實驗區域': item.Location || '',      // 對齊 Location
+                    '細項位置': item.Personal_Remark || '' // 對齊 Personal_Remark
+                };
+            });
+
         const worksheet = XLSX.utils.json_to_sheet(exportData);
         const workbook = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(workbook, worksheet, "實驗室盤點結果");
-        XLSX.writeFile(workbook, `實驗室盤點結果_${new Date().toISOString().split('T')[0]}.xlsx`);
-        this.showNotification("Excel 匯出成功！", "success");
+        XLSX.utils.book_append_sheet(workbook, worksheet, "盤點清冊");
+        XLSX.writeFile(workbook, `實驗室全量同步清冊_${new Date().toISOString().split('T')[0]}.xlsx`);
     },
 
     // === 6. 產編關聯作業 (綁定新舊儀器) ===
