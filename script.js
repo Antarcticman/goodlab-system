@@ -4,6 +4,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/fireba
 import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, writeBatch, arrayUnion } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 import { UI } from "./shared.js";
+import { LOCATIONS, LOCATIONS_WITH_OTHER } from "./constants.js";
 // 2. 填入你的專屬金鑰
 const firebaseConfig = {
   apiKey: "AIzaSyBdgqZaW2jdJHTbKplPur2R6JxDyjb02PU",
@@ -28,6 +29,7 @@ const app = {
     invSortState: { key: 'Property_ID', direction: 'asc' },
     tempLinkedPropId: null,
     currentEditingInstTags: [],
+    currentInstIsActive: true, // ★ Phase 2：取代 Is_Active hidden input 的字串布林轉換
     // ★ 新增：用來暫存預覽的匯入資料
     tempImportPayloads: [],
     // === 統一資料庫 ID 生成邏輯 (YYYYMMDDHHMMSS_隨機數) ===
@@ -53,7 +55,8 @@ const app = {
     invFilterStatus: 'All',
 
     init: function() {
-        this.setupRealtimeListeners(); // ★ 改成呼叫這個新的監聽器
+        this.populateLocationSelects(); // ★ Phase 2：先填充所有 Location 下拉選單
+        this.setupRealtimeListeners();
         this.setupModalEvents();
         this.setupAutoStatus(); 
         this.setupLogAutoStatus();
@@ -77,7 +80,7 @@ const app = {
         try {
             await signInWithPopup(auth, provider);
         } catch (error) {
-            this.showNotification("登入失敗: " + e.message, 'error');
+            this.showNotification("登入失敗: " + error.message, 'error');
         }
     },
 
@@ -253,14 +256,13 @@ const app = {
     },
     // === 新增：自訂綁定視窗邏輯 ===
     cancelBinding: function() {
-        // ★ 使用者拒絕綁定，直接強制踢出系統 (記得檔案最上方要有引入 signOut 與 auth)
-        import("https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js").then(module => {
-            const auth = module.getAuth();
-            module.signOut(auth).then(() => {
-                app.closeModal('bind-modal');
-                this.showNotification("已取消綁定，帳號已登出。", "info");
-                // 登出後 Firebase 會自動觸發 onAuthStateChanged 變成 Guest 狀態
-            });
+        // 使用者拒絕綁定，直接強制踢出系統（使用頂部已引入的 signOut 與 auth）
+        signOut(auth).then(() => {
+            app.closeModal('bind-modal');
+            this.showNotification("已取消綁定，帳號已登出。", "info");
+            // 登出後 Firebase 會自動觸發 onAuthStateChanged 變成 Guest 狀態
+        }).catch(e => {
+            this.showNotification("登出失敗: " + e.message, "error");
         });
     },
 
@@ -308,33 +310,7 @@ const app = {
         }
     },
 
-    // === 根據權限隱藏/顯示按鈕 ===
-    updateUIByRole: function() {
-        const isAdmin = this.currentRole === 'Admin';
-        
-        // 1. 上方的「新增」按鈕直接變灰 Disabled
-        document.querySelectorAll('.admin-only').forEach(el => {
-            el.disabled = !isAdmin; 
-        });
-
-        // 2. 導覽列的限制按鈕變灰 Disabled
-        const accNavBtn = document.getElementById('nav-accounting');
-        const invNavBtn = document.getElementById('nav-inventory');
-        if (accNavBtn) accNavBtn.disabled = !isAdmin;
-        if (invNavBtn) invNavBtn.disabled = !isAdmin;
-
-        // 防呆：如果權限不足卻在 Admin 專屬頁面，自動切換回人員頁面
-        const currentPage = document.querySelector('.page-section.active');
-        if (currentPage && (currentPage.id === 'page-accounting' || currentPage.id === 'page-inventory') && !isAdmin) {
-            this.switchTab('members'); 
-        }
-
-        // 4. 重新渲染所有表格 (帶入按鈕禁用邏輯)
-        this.renderMembers();
-        this.renderInstruments();
-        this.renderLogs();
-        this.renderAccounting();
-    },
+    // [Phase 1 已移除] updateUIByRole：此函式從未被呼叫，且使用了不存在的 HTML ID（nav-accounting/nav-inventory），已刪除。
 
     // ================= 共用刪除邏輯 =================
     deleteRecord: async function(collectionName, id, modalId) {
@@ -962,18 +938,7 @@ const app = {
         tr.after(subTr);
     },
 
-    updateLocationFilter: function() {
-        const select = document.getElementById('filter-location');
-        if (select.options.length > 1) return;
-
-        const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean);
-        locations.sort().forEach(loc => {
-            const opt = document.createElement('option');
-            opt.value = loc;
-            opt.innerText = loc;
-            select.appendChild(opt);
-        });
-    },
+    // [Phase 2 已移除] updateLocationFilter：查詢不存在的 #filter-location，死程式碼已刪除。
 
     // === Modal 內的產編標籤系統 ===
     renderModalInstTags: function() {
@@ -1013,37 +978,12 @@ const app = {
         this.unlinkProperty(pid, instId);
     },
 
-    // ★ 全新：雙向解綁引擎
-    unlinkProperty: async function(propId, instId) {
-        if (this.currentRole !== 'Admin') return;
-        if (!confirm(`確定要解除產編 [${propId}] 的綁定嗎？\n解除後，該產編將回到「未分配」狀態。`)) return;
-
-        try {
-            // 1. 從儀器中拔除陣列
-            const inst = this.data.instruments.find(i => i.Instrument_ID === instId);
-            if (inst) {
-                const updatedTags = (inst.Linked_Property_IDs || []).filter(id => id !== propId);
-                await updateDoc(doc(db, "instruments", instId), { Linked_Property_IDs: updatedTags });
-            }
-            // 2. 清空產編的實驗室地點
-            await updateDoc(doc(db, "inventory", propId), { Location: "" });
-
-            this.showNotification("✅ 已成功解除綁定！", 'success');
-
-            // 3. 畫面同步：如果目前正開著編輯視窗，即時移除該標籤
-            if (this.currentEditingInstTags && this.currentEditingInstTags.includes(propId)) {
-                this.currentEditingInstTags = this.currentEditingInstTags.filter(id => id !== propId);
-                this.renderModalInstTags();
-            }
-            this.renderInventory();
-        } catch (e) {
-            this.showNotification("解除綁定失敗: " + e.message, 'error');
-        }
-    },
+    // [Phase 1 已移除] 此處原有第一個 unlinkProperty 定義，與 2371 行重複（後者覆蓋前者）。
+    // 唯一有效的 unlinkProperty 定義在本檔案末段，Admin 權限由 checkInvEditPermission() 保障。
 
     // === 儀器狀態專用控制函式 (新增) ===
     setInstActive: function(isActive) {
-        document.getElementById('Is_Active').value = isActive ? 'TRUE' : 'FALSE';
+        this.currentInstIsActive = isActive; // ★ Phase 2：改用狀態變數，移除字串布林轉換
         const btnTrue = document.getElementById('btn-inst-active-true');
         const btnFalse = document.getElementById('btn-inst-active-false');
         
@@ -1077,8 +1017,8 @@ const app = {
         
         this.fillMemberSelect('Manager_ID');
         const locSelect = modal.querySelector('#Location');
-        const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean).sort();
-        locSelect.innerHTML = '<option value="">請選擇區域</option>' + locations.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        // ★ Phase 2：改用 constants.js 的 LOCATIONS 常數，不再動態從資料建構
+        locSelect.innerHTML = '<option value="">請選擇區域</option>' + LOCATIONS.map(loc => `<option value="${loc}">${loc}</option>`).join('');
 
         inputs.forEach(el => el.value = '');
         
@@ -1114,15 +1054,14 @@ const app = {
         // ★ 修復核心：強制手動將 ID 寫入，避免被過濾器漏掉
         payload.Instrument_ID = id;
 
-        // 抓取其他表單內容，略過舊的 Property_ID 與手動處理過的 Instrument_ID
+        // 抓取其他表單內容，略過 Property_ID、Instrument_ID 和 Is_Active（Is_Active 改用狀態變數）
         document.querySelectorAll('#inst-modal input, #inst-modal select').forEach(el => {
-            if (el.id && el.id !== 'Property_ID' && el.id !== 'Instrument_ID') {
-                let val = el.value;
-                // 強制轉回 Boolean
-                if (el.id === 'Is_Active') val = (val === 'TRUE');
-                payload[el.id] = val;
+            if (el.id && el.id !== 'Property_ID' && el.id !== 'Instrument_ID' && el.id !== 'Is_Active') {
+                payload[el.id] = el.value;
             }
         });
+        // ★ Phase 2：直接使用狀態變數，寫入原生 Boolean（不再依賴 hidden input 字串）
+        payload.Is_Active = this.currentInstIsActive;
 
         // 寫入我們編輯好的標籤陣列
         payload.Linked_Property_IDs = this.currentEditingInstTags;
@@ -1172,19 +1111,7 @@ const app = {
         });
     },
 
-    updateLogLocationFilter: function() {
-        const select = document.getElementById('filter-log-location');
-        if (!select || select.options.length > 1) return; // 如果已經有選項就不重複加
-
-        // 從儀器清單抓出所有不重複的地點
-        const locations = [...new Set(this.data.instruments.map(i => i.Location))].filter(Boolean);
-        locations.sort().forEach(loc => {
-            const opt = document.createElement('option');
-            opt.value = loc;
-            opt.innerText = loc;
-            select.appendChild(opt);
-        });
-    },
+    // [Phase 2 已移除] updateLogLocationFilter：查詢不存在的 #filter-log-location，死程式碼已刪除。
 
     // === 3. 維修紀錄渲染 ===
     renderLogs: function() {
@@ -1199,11 +1126,8 @@ const app = {
         const searchEl = document.getElementById('search-log');
         const term = searchEl ? searchEl.value.toLowerCase() : ''; // ★ 安全防呆
         const statusFilter = this.logFilterStatus;
-        const locFilterEl = document.getElementById('filter-log-location');
-        const locFilter = locFilterEl ? locFilterEl.value : '';
         const isAdmin = this.currentRole === 'Admin';
-
-        this.updateLogLocationFilter();
+        // [Phase 2] 移除對不存在的 #filter-log-location 的死參照
 
         let filtered = this.data.logs.filter(log => {
             const inst = this.data.instruments.find(i => i.Instrument_ID === log.Instrument_ID);
@@ -1213,9 +1137,8 @@ const app = {
             const text = (log.Problem_Desc + instName + log.Log_ID).toLowerCase();
             const matchText = text.includes(term);
             const matchStatus = statusFilter === 'All' ? true : log.Status === statusFilter;
-            const matchLoc = locFilter ? instLoc === locFilter : true;
             
-            return matchText && matchStatus && matchLoc;
+            return matchText && matchStatus;
         });
 
         // 排序邏輯
@@ -1308,9 +1231,9 @@ const app = {
         this.fillMemberSelect('Owner_ID'); 
         
         const locSelect = document.getElementById('Log_Location_Filter');
-        const areas = ["多腔體區", "機房", "製程區", "黃光室", "量測區", "辦公區", "頂樓", "其他"];
+        // ★ Phase 2：改用 constants.js 的 LOCATIONS_WITH_OTHER，移除硬編碼陣列
         locSelect.innerHTML = '<option value="">(選擇區域)</option>' + 
-            areas.map(a => `<option value="${a}">${a}</option>`).join('');
+            LOCATIONS_WITH_OTHER.map(a => `<option value="${a}">${a}</option>`).join('');
 
         // 3. 根據有無資料進行填值 (Data Binding)
         if (data) {
@@ -1434,11 +1357,12 @@ const app = {
     saveLog: async function() {
         const payload = {};
         document.querySelectorAll('#log-modal input, #log-modal select, #log-modal textarea').forEach(el => {
+            // ★ Phase 1 修復：先排除輔助欄位，再做 replace，避免 'Log_Location_Filter' 變成 'Location_Filter' 後判斷失效
+            if (el.id === 'Log_Location_Filter') return;
             let key = el.id;
             if (key.startsWith('Log_') && key !== 'Log_ID') {
                 key = key.replace('Log_', '');
             }
-            if (key === 'Log_Location_Filter') return; 
             payload[key] = el.value;
         });
 
@@ -1651,47 +1575,45 @@ const app = {
     },
 
     // ================= 通知系統 =================
+    // ★ Phase 1 修復：統一委派給 shared.js 的 UI.showToast（帶圖示的完整版），移除自行實作的簡化版
     showNotification: function(msg, type = 'info', duration = 3000) {
-        let container = document.getElementById('toast-container');
-        // 如果 HTML 裡沒有容器，就自動建一個
-        if (!container) {
-            container = document.createElement('div');
-            container.id = 'toast-container';
-            container.className = 'toast-container';
-            document.body.appendChild(container);
-        }
-
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerHTML = `<span>${msg}</span>`;
-        container.appendChild(toast);
-
-        // 設定時間到自動淡出並刪除
-        setTimeout(() => {
-            toast.classList.add('fadeOut');
-            setTimeout(() => toast.remove(), 300); // 等待淡出動畫播完
-        }, duration);
+        UI.showToast(msg, type, duration);
     },
     // ================= 共用工具 =================
 
-    closeModal: function(modalId) {
-        const m = document.getElementById(modalId);
-        if (m) m.classList.add('hidden'); // 加入防呆
-    },
+    // [Phase 1 已移除] 第二個 closeModal 定義（此處）會覆蓋第 46 行的版本。
+    // 正確的 closeModal 已在第 46 行定義，委派給 UI.closeModal()。
 
     setupModalEvents: function() {
-        ['member-modal', 'inst-modal', 'log-modal', 'acc-modal', 'help-modal'].forEach(id => {
-            const modal = document.getElementById(id);
-            if(modal) modal.addEventListener('click', (e) => { if (e.target === modal) this.closeModal(id); });
-        });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-                ['member-modal', 'inst-modal', 'log-modal', 'acc-modal'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if(el && !el.classList.contains('hidden')) this.closeModal(id);
-                });
-            }
-        });
+        // ★ Phase 2：已移除「點擊背景關閉 Modal」功能（使用者反映誤觸率高）
+        // ★ Phase 2：已移除重複的 ESC 監聽器，由檔案末段的全域監聽器統一處理
+    },
+
+    // ★ Phase 2：統一填充所有 Location 下拉選單，取代 7 處硬編碼
+    populateLocationSelects: function() {
+        // 儀器頁過濾（標準區域，不含「其他」）
+        const instFilter = document.getElementById('filter-inst-location');
+        if (instFilter) {
+            instFilter.innerHTML = '<option value="">所有區域</option>' +
+                LOCATIONS.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        }
+        // 產編過濾（含「其他」）
+        const invFilter = document.getElementById('filter-inv-location');
+        if (invFilter) {
+            invFilter.innerHTML = '<option value="">所有區域</option>' +
+                LOCATIONS_WITH_OTHER.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        }
+        // 產編位置編輯 Modal
+        const locSelect = document.getElementById('Loc_Select_Value');
+        if (locSelect) {
+            locSelect.innerHTML = LOCATIONS_WITH_OTHER.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        }
+        // 儀器關聯 Modal 的區域選擇
+        const linkLoc = document.getElementById('Link_Location');
+        if (linkLoc) {
+            linkLoc.innerHTML = '<option value="">請選擇區域...</option>' +
+                LOCATIONS_WITH_OTHER.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+        }
     },
 
     copyEmail: function(event, email) {
@@ -1760,12 +1682,12 @@ const app = {
 
     formatDateForInput: function(dateStr) {
         if (!dateStr || dateStr === "-") return "";
+        if (typeof dateStr === 'string' && dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) return dateStr;
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return "";
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
+        // 修正時區偏移，確保取得當地時間的 YYYY-MM-DD
+        const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+        return localDate.toISOString().split('T')[0];
     },
     // ================= 產編清點邏輯 (Phase 1.3) =================
 
