@@ -13,11 +13,17 @@
         <aside class="sidebar">
             <div class="sidebar-header">GOODLAB <span style="font-size: 0.7rem; color: var(--primary);">PRO</span></div>
             <nav class="sidebar-nav">
-                <button id="nav-btn-members" class="nav-item active" onclick="app.switchTab('members')"><i class="ph ph-users"></i> 人員管理</button>
-                <button id="nav-btn-instruments" class="nav-item" onclick="app.switchTab('instruments')"><i class="ph ph-microscope"></i> 儀器設備</button>
+                <div class="nav-group-label">日常管理</div>
                 <button id="nav-btn-logs" class="nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench"></i> 維修紀錄</button>
-                <button id="nav-btn-accounting" class="nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> 公積金報帳</button>
+                <button id="nav-btn-routine" class="nav-item" onclick="app.switchTab('routine')"><i class="ph ph-arrows-clockwise"></i> 實驗室 Routine</button>
+                <button id="nav-btn-duty" class="nav-item" onclick="app.switchTab('duty')"><i class="ph ph-broom"></i> 值日生</button>
                 <button id="nav-btn-inventory" class="nav-item" onclick="app.switchTab('inventory')"><i class="ph ph-list-checks"></i> 產編清點</button>
+
+                <div class="nav-group-label" style="margin-top: 8px;">行政資源</div>
+                <button id="nav-btn-accounting" class="nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> 公積金報帳</button>
+                <button id="nav-btn-members" class="nav-item active" onclick="app.switchTab('members')"><i class="ph ph-users"></i> 人員管理</button>
+                <button id="nav-btn-employment" class="nav-item" onclick="app.switchTab('employment')"><i class="ph ph-graduation-cap"></i> 學生聘僱</button>
+                <button id="nav-btn-instruments" class="nav-item" onclick="app.switchTab('instruments')"><i class="ph ph-microscope"></i> 儀器設備</button>
             </nav>
         </aside>
 
@@ -223,16 +229,70 @@
                         </table>
                     </div>
                 </section>
+
+                <!-- ======= 值日生 (Phase 5) ======= -->
+                <section id="page-duty" class="page-section">
+                    <div id="duty-content">
+                        <!-- 由 duty.js 動態渲染 -->
+                        <div style="text-align:center; padding:40px; color:var(--text-muted);">
+                            <i class="ph ph-broom" style="font-size:2.5rem; display:block; margin-bottom:10px;"></i>
+                            載入中...
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======= 實驗室 Routine (Phase 5) ======= -->
+                <section id="page-routine" class="page-section">
+                    <div id="routine-content">
+                        <div style="text-align:center; padding:40px; color:var(--text-muted);">
+                            <i class="ph ph-arrows-clockwise" style="font-size:2.5rem; display:block; margin-bottom:10px;"></i>
+                            載入中...
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ======= 學生聘僱 (Phase 5) ======= -->
+                <section id="page-employment" class="page-section">
+                    <div id="employment-content">
+                        <div style="text-align:center; padding:40px; color:var(--text-muted);">
+                            <i class="ph ph-graduation-cap" style="font-size:2.5rem; display:block; margin-bottom:10px;"></i>
+                            載入中...
+                        </div>
+                    </div>
+                </section>
+
             </div>
         </main>
 
+        <!-- 手機底部導覽列 (Phase 5: 3常用 + 更多) -->
         <nav class="mobile-nav">
-            <button class="mobile-nav-item active" onclick="app.switchTab('members')"><i class="ph ph-users"></i> <span>人員</span></button>
-            <button class="mobile-nav-item" onclick="app.switchTab('instruments')"><i class="ph ph-microscope"></i> <span>儀器</span></button>
             <button class="mobile-nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench"></i> <span>維修</span></button>
-            <button class="mobile-nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> <span>財務</span></button>
-            <button class="mobile-nav-item" onclick="app.switchTab('inventory')"><i class="ph ph-barcode"></i> <span>產編</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('duty')"><i class="ph ph-broom"></i> <span>值日</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> <span>公積金</span></button>
+            <button class="mobile-nav-item" id="mobile-more-btn" onclick="app.toggleMobileMore()"><i class="ph ph-dots-three-outline"></i> <span>更多</span></button>
         </nav>
+
+        <!-- 手機版「更多」抽屜選單 -->
+        <div id="mobile-more-drawer" class="mobile-more-drawer hidden">
+            <div class="mobile-drawer-backdrop" onclick="app.toggleMobileMore()"></div>
+            <div class="mobile-drawer-content">
+                <div class="mobile-drawer-header">所有功能</div>
+                <div class="mobile-drawer-group">
+                    <div class="mobile-drawer-group-label">📌 日常管理</div>
+                    <button onclick="app.switchTab('logs'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-wrench"></i> 維修紀錄</button>
+                    <button onclick="app.switchTab('routine'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-arrows-clockwise"></i> 實驗室 Routine</button>
+                    <button onclick="app.switchTab('duty'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-broom"></i> 值日生</button>
+                    <button onclick="app.switchTab('inventory'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-list-checks"></i> 產編清點</button>
+                </div>
+                <div class="mobile-drawer-group">
+                    <div class="mobile-drawer-group-label">💼 行政資源</div>
+                    <button onclick="app.switchTab('accounting'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-currency-circle-dollar"></i> 公積金報帳</button>
+                    <button onclick="app.switchTab('members'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-users"></i> 人員管理</button>
+                    <button onclick="app.switchTab('employment'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-graduation-cap"></i> 學生聘僱</button>
+                    <button onclick="app.switchTab('instruments'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-microscope"></i> 儀器設備</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="member-modal" class="modal hidden">

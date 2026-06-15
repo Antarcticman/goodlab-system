@@ -62,6 +62,7 @@ export const authModule = {
         if (memberData) {
             // 已綁定成功 (User / Admin)
             this.currentRole = memberData.Role || 'User';
+            this.currentMember = memberData; // Phase 5: 儲存完整 member 資料
             if(userInfo) userInfo.innerText = `👤 ${memberData.Name_Ch} (${this.currentRole})`;
             closeModal('bind-modal');
         } else {
@@ -133,15 +134,18 @@ export const authModule = {
         }
     },
 
-    // === 側邊欄與手機 UI 動態控制 ===
+    // === 側邊欄與手機 UI 動態控制 (Phase 5: 8 頁面) ===
     updateSidebarUI: function() {
-        const navMap = {
-            // ★ 同時抓取「電腦版 ID」與「手機版 onclick 屬性」的按鈕
-            'instruments': [document.getElementById('nav-btn-instruments'), document.querySelector('.mobile-nav-item[onclick*="instruments"]')],
-            'logs': [document.getElementById('nav-btn-logs'), document.querySelector('.mobile-nav-item[onclick*="logs"]')],
-            'accounting': [document.getElementById('nav-btn-accounting'), document.querySelector('.mobile-nav-item[onclick*="accounting"]')],
-            'inventory': [document.getElementById('nav-btn-inventory'), document.querySelector('.mobile-nav-item[onclick*="inventory"]')]
-        };
+        // 定義所有導覽按鈕 [桌面版ID, 手機版selector]
+        const navIds = ['logs', 'routine', 'duty', 'inventory', 'accounting', 'members', 'employment', 'instruments'];
+        
+        const navMap = {};
+        navIds.forEach(id => {
+            navMap[id] = [
+                document.getElementById('nav-btn-' + id),
+                document.querySelector('.mobile-nav-item[onclick*="' + id + '"]')
+            ];
+        });
 
         // 預設：全部物理隱藏 (display: none)
         Object.values(navMap).forEach(arr => { 
@@ -149,16 +153,23 @@ export const authModule = {
         });
 
         if (this.currentRole === 'Admin') {
-            // Admin：全部按鈕解鎖
+            // Admin：全部解鎖
             Object.values(navMap).forEach(arr => { 
                 arr.forEach(el => { if(el) el.style.display = 'flex'; }); 
             });
         } else if (this.currentRole === 'User') {
-            // User：只能看到「儀器」與「產編」
-            navMap['instruments'].forEach(el => { if(el) el.style.display = 'flex'; });
-            navMap['inventory'].forEach(el => { if(el) el.style.display = 'flex'; });
+            // User：可看「儀器」「產編」「值日生」「人員」
+            ['instruments', 'inventory', 'duty', 'members'].forEach(id => {
+                navMap[id].forEach(el => { if(el) el.style.display = 'flex'; });
+            });
         }
         // Guest：什麼都不做，畫面上只會剩下預設顯示的「人員管理」
+
+        // 手機版「更多」按鈕永遠可見（非 Guest 時）
+        const moreBtn = document.getElementById('mobile-more-btn');
+        if (moreBtn) {
+            moreBtn.style.display = (this.currentRole !== 'Guest') ? 'flex' : 'none';
+        }
     },
 
     // === 頁面說明 Modal ===

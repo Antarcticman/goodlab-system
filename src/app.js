@@ -1,5 +1,5 @@
 /**
- * GOODLAB — 主應用程式協調器 (Phase 4)
+ * GOODLAB — 主應用程式協調器 (Phase 5)
  * 
  * 將所有功能模組混入 (mixin) 到單一 app 物件中，
  * 維持原有的 this.xxx 呼叫慣例，同時享有模組化帶來的可維護性。
@@ -18,11 +18,19 @@ import { instrumentsModule } from './instruments.js';
 import { logsModule } from './logs.js';
 import { accountingModule } from './accounting.js';
 import { inventoryModule } from './inventory.js';
+import { dutyModule } from './duty.js';
+import { routineModule } from './routine.js';
+import { employmentModule } from './employment.js';
 
 // === 主 App 物件 ===
 const app = {
     // --- 共用狀態 ---
-    data: { members: [], instruments: [], logs: [], accounting: [], inventory: [] },
+    data: {
+        members: [], instruments: [], logs: [], accounting: [], inventory: [],
+        duty_records: [], duty_state: null,
+        routines: [],
+        projects: [], employments: []
+    },
     invSortState: { key: 'Property_ID', direction: 'asc' },
     tempLinkedPropId: null,
     currentEditingInstTags: [],
@@ -35,6 +43,7 @@ const app = {
     invFilterStatus: 'All',
     currentUser: null,
     currentRole: 'Guest',
+    currentMember: null, // Phase 5: 當前登入的 member 完整資料
     membersLoaded: false,
 
     // --- 訪客遮罩 ---
@@ -95,7 +104,21 @@ const app = {
                     <br>請直接上傳學校提供之 Excel 原檔。系統會自動略過前 6 行表頭。</li>
                 <li><strong>盤點流程：</strong>Admin 開放盤點後，User 可點擊列表左側的燈號來切換「已盤/未盤」。</li>
                 <li><strong>匯出功能：</strong>盤點完成後可匯出完整的 Excel 清冊。</li>
-            </ul>`
+            </ul>`,
+        'duty': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">值日生工作</h3>
+            <p style="margin-bottom: 10px;">碩班同學每週輪流值日，負責實驗室清潔與耗材清點。</p>
+            <ul style="margin-top: 10px; padding-left: 20px; line-height: 1.6;">
+                <li><strong>輪值規則：</strong>依學號排序的碩班同學 (非 Admin) 自動輪值。</li>
+                <li><strong>代班機制：</strong>當週值日生可以發出代班邀請，待對方確認後工作進度才會轉移。</li>
+                <li><strong>耗材補貨：</strong>點擊耗材旁的 <i class="ph ph-info"></i> 可查看廠商聯絡方式。</li>
+            </ul>`,
+        'routine': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">實驗室 Routine</h3>
+            <p style="margin-bottom: 10px;">管理週期性維護任務，自動追蹤下次到期日並提醒。僅 Admin 可見。</p>`,
+        'employment': `
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">學生聘僱管理</h3>
+            <p style="margin-bottom: 10px;">管理各計畫的學生聘僱紀錄，包含甘特圖與 Excel 匯出。僅 Admin 可見。</p>`
     },
 
     // --- 工具函式（混入到 app 上，讓各模組可以透過 this. 呼叫）---
@@ -134,22 +157,34 @@ const app = {
         }
     },
 
+    // --- 手機版「更多」選單 ---
+    toggleMobileMore: function() {
+        const drawer = document.getElementById('mobile-more-drawer');
+        if (drawer) drawer.classList.toggle('hidden');
+    },
+
     // --- 頁面切換 ---
     switchTab: function(tabId) {
+        // 權限守衛
         if (this.currentRole === 'Guest' && tabId !== 'members') return;
-        if (this.currentRole === 'User' && (tabId === 'logs' || tabId === 'accounting')) return;
+        
+        const userForbidden = ['logs', 'accounting', 'routine', 'employment'];
+        if (this.currentRole === 'User' && userForbidden.includes(tabId)) return;
 
         document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
         const targetPage = document.getElementById('page-' + tabId);
         if (targetPage) targetPage.classList.add('active');
 
+        // 桌面版側邊欄 highlight
         document.querySelectorAll('.nav-item').forEach(btn => {
-            const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId);
+            const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes("'" + tabId + "'");
             btn.classList.toggle('active', isMatch);
         });
 
+        // 手機版底部欄 highlight
         document.querySelectorAll('.mobile-nav-item').forEach(btn => {
-            const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId);
+            if (btn.id === 'mobile-more-btn') return; // 「更多」按鈕不參與 highlight
+            const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes("'" + tabId + "'");
             btn.classList.toggle('active', isMatch);
         });
 
@@ -158,16 +193,26 @@ const app = {
             'instruments': '儀器設備',
             'logs': '維修紀錄',
             'accounting': '公積金報帳',
-            'inventory': '產編清點'
+            'inventory': '產編清點',
+            'duty': '值日生工作',
+            'routine': '實驗室 Routine',
+            'employment': '學生聘僱'
         };
         const titleEl = document.getElementById('current-page-title');
         if (titleEl) titleEl.innerText = titleMap[tabId] || '實驗室管理';
 
-        if (tabId === 'inventory') this.renderInventory();
-        if (tabId === 'instruments') this.renderInstruments();
-        if (tabId === 'logs') this.renderLogs();
-        if (tabId === 'accounting') this.renderAccounting();
-        if (tabId === 'members') this.renderMembers();
+        // 切頁時觸發對應渲染
+        const renderMap = {
+            'inventory': () => this.renderInventory(),
+            'instruments': () => this.renderInstruments(),
+            'logs': () => this.renderLogs(),
+            'accounting': () => this.renderAccounting(),
+            'members': () => this.renderMembers(),
+            'duty': () => this.renderDuty(),
+            'routine': () => this.renderRoutine(),
+            'employment': () => this.renderEmployment()
+        };
+        if (renderMap[tabId]) renderMap[tabId]();
     },
 
     // --- Firebase 即時連線 ---
@@ -180,32 +225,54 @@ const app = {
             }
         });
 
+        // 原有集合
         onSnapshot(collection(db, "accounting"), (snapshot) => {
-            this.data.accounting = snapshot.docs.map(doc => doc.data());
+            this.data.accounting = snapshot.docs.map(d => d.data());
             this.renderAccounting();
             this.calcDashboard();
         });
 
         onSnapshot(collection(db, "members"), (snapshot) => {
-            this.data.members = snapshot.docs.map(doc => doc.data());
+            this.data.members = snapshot.docs.map(d => d.data());
             this.membersLoaded = true;
             this.renderMembers();
             this.checkUserRole();
         });
 
         onSnapshot(collection(db, "instruments"), (snapshot) => {
-            this.data.instruments = snapshot.docs.map(doc => doc.data());
+            this.data.instruments = snapshot.docs.map(d => d.data());
             this.renderInstruments();
         });
 
         onSnapshot(collection(db, "logs"), (snapshot) => {
-            this.data.logs = snapshot.docs.map(doc => doc.data());
+            this.data.logs = snapshot.docs.map(d => d.data());
             this.renderLogs();
         });
 
         onSnapshot(collection(db, "inventory"), (snapshot) => {
-            this.data.inventory = snapshot.docs.map(doc => doc.data());
+            this.data.inventory = snapshot.docs.map(d => d.data());
             this.renderInventory();
+        });
+
+        // Phase 5: 新增集合
+        onSnapshot(collection(db, "duty_records"), (snapshot) => {
+            this.data.duty_records = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
+            this.renderDuty();
+        });
+
+        onSnapshot(collection(db, "routines"), (snapshot) => {
+            this.data.routines = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
+            this.renderRoutine();
+        });
+
+        onSnapshot(collection(db, "projects"), (snapshot) => {
+            this.data.projects = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
+            this.renderEmployment();
+        });
+
+        onSnapshot(collection(db, "employments"), (snapshot) => {
+            this.data.employments = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
+            this.renderEmployment();
         });
     },
 
@@ -234,11 +301,17 @@ Object.assign(app, instrumentsModule);
 Object.assign(app, logsModule);
 Object.assign(app, accountingModule);
 Object.assign(app, inventoryModule);
+Object.assign(app, dutyModule);
+Object.assign(app, routineModule);
+Object.assign(app, employmentModule);
 
 // === 全域 UX 監聽器 ===
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         document.querySelectorAll('.modal:not(.hidden)').forEach(m => app.closeModal(m.id));
+        // 也關閉手機更多選單
+        const drawer = document.getElementById('mobile-more-drawer');
+        if (drawer && !drawer.classList.contains('hidden')) drawer.classList.add('hidden');
     }
 });
 
