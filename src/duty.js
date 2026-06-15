@@ -8,7 +8,7 @@
  *                            submitted: false, submitted_at: null }
  */
 import { db, doc, setDoc, updateDoc } from './firebase.js';
-import { DUTY_CLEANING_TASKS, DUTY_SUPPLY_ITEMS, SUPPLY_VENDORS } from './constants.js';
+import { DUTY_CLEANING_TASKS, DUTY_SUPPLY_ITEMS, SUPPLY_VENDORS, DUTY_NOTES } from './constants.js';
 
 export const dutyModule = {
 
@@ -168,11 +168,11 @@ export const dutyModule = {
             </li>`;
         }).join('');
 
-        // 耗材 checklist（含 vendor tooltip）
+        // 耗材 checklist（含 vendor tooltip，依 vendorGroup 查詢）
         const suppliesHtml = DUTY_SUPPLY_ITEMS.map(item => {
             const checked = record && record.supplies && record.supplies[item.id] ? 'checked' : '';
             const disabled = !canEdit || (record && record.submitted) ? 'disabled' : '';
-            const vendor = SUPPLY_VENDORS[item.id];
+            const vendor = SUPPLY_VENDORS[item.vendorGroup];
             const tooltipHtml = vendor ? `
                 <span class="supply-info-tooltip" tabindex="0">
                     <i class="ph ph-info" style="color:var(--primary); font-size:1rem;"></i>
@@ -256,6 +256,16 @@ export const dutyModule = {
                 </div>
             </div>
             `}
+
+            <div class="duty-card" style="background:#f8fafc;">
+                <div class="duty-card-header"><h3>📝 補充說明</h3></div>
+                ${DUTY_NOTES.map(note => `
+                    <div style="margin-bottom:12px; padding:10px 14px; background:white; border-radius:8px; border-left:3px solid var(--primary);">
+                        <div style="font-weight:600; margin-bottom:4px;">${note.title}</div>
+                        <div style="font-size:0.9rem; color:var(--text-muted); line-height:1.6;">${note.content}</div>
+                    </div>
+                `).join('')}
+            </div>
         `;
 
         // 自動建立紀錄

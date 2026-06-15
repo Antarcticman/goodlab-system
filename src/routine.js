@@ -4,7 +4,7 @@
  * 週期性維護任務管理（僅 Admin）。
  * 資料模型：
  *   routines/{id}: { name, category, interval_days, last_done, next_due,
- *                    remind_days: [7, 3, 0], url, created_at }
+ *                    remind_days: [7, 3, 0], url, notes, created_at }
  */
 import { db, doc, setDoc, deleteDoc } from './firebase.js';
 import { ROUTINE_CATEGORIES } from './constants.js';
@@ -92,7 +92,10 @@ export const routineModule = {
                         <input type="checkbox" style="width:18px; height:18px; cursor:pointer; accent-color:var(--success);"
                             onchange="app.completeRoutine('${r._id}')" title="標記為已完成">
                     </td>
-                    <td>${nameHtml}</td>
+                    <td>
+                        ${nameHtml}
+                        ${r.notes ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px; white-space:pre-line; line-height:1.5; padding:6px 8px; background:#f8fafc; border-radius:6px; border-left:2px solid var(--border-color);">${this._linkifyText(r.notes)}</div>` : ''}
+                    </td>
                     <td class="hide-mobile">每 ${r.interval_days || '-'} 天</td>
                     <td>${r.last_done || '-'}</td>
                     <td>${r.next_due || '-'}</td>
@@ -227,6 +230,10 @@ export const routineModule = {
                     <label>相關連結 (選填)</label>
                     <input type="url" id="routine-url" value="${routine ? (routine.url || '') : ''}" placeholder="https://...">
                 </div>
+                <div class="form-group">
+                    <label>備註 / 步驟說明 (選填)</label>
+                    <textarea id="routine-notes" rows="4" placeholder="例如：\n1. 關閉 valve\n2. 擦拭腕部..." style="resize:vertical; width:100%; font-family:inherit;">${routine ? (routine.notes || '') : ''}</textarea>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="app.closeModal('routine-edit-modal'); document.getElementById('routine-edit-modal')?.remove();">取消</button>
@@ -252,6 +259,7 @@ export const routineModule = {
             interval_days: parseInt(document.getElementById('routine-interval').value) || 30,
             remind_days: remindDays.length > 0 ? remindDays : [7, 3, 0],
             url: document.getElementById('routine-url').value.trim() || null,
+            notes: document.getElementById('routine-notes').value.trim() || null,
             last_done: existing ? existing.last_done : null,
             next_due: existing ? existing.next_due : null,
             created_at: existing ? existing.created_at : new Date().toISOString()
