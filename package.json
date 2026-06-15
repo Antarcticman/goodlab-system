@@ -1,0 +1,28 @@
+{
+  "name": "goodlab-system",
+  "version": "1.0.0",
+  "description": "",
+  "main": "constants.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Antarcticman/goodlab-system.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Antarcticman/goodlab-system/issues"
+  },
+  "homepage": "https://github.com/Antarcticman/goodlab-system#readme",
+  "devDependencies": {
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "firebase": "^12.14.0"
+  }
+}

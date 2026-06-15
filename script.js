@@ -760,8 +760,12 @@ const app = {
             finalPayer = 'Fund';
         }
 
+        const txnId = document.getElementById('Txn_ID').value;
+        const isNew = !this.data.accounting.find(a => a.Txn_ID === txnId);
+        const now = new Date().toISOString();
+
         const payload = {
-            Txn_ID: document.getElementById('Txn_ID').value,
+            Txn_ID: txnId,
             Type: type,
             Date: document.getElementById('Acc_Date').value,
             Description: document.getElementById('Acc_Description').value,
@@ -771,8 +775,11 @@ const app = {
             Payback_Date: document.getElementById('Payback_Date').value,
             Invoice_Link: document.getElementById('Invoice_Link').value,
             Remark: document.getElementById('Acc_Remark').value,
-            Fund_Source: fundSourceVal
+            Fund_Source: fundSourceVal,
+            // ★ Phase 3：稽核時間戳
+            Updated_At: now
         };
+        if (isNew) payload.Created_At = now;
 
         if (!payload.Description || !payload.Amount) { this.showNotification("⚠️ 請填寫項目和金額", 'error'); return; }
 
@@ -1805,6 +1812,28 @@ const app = {
         btn.disabled = true;
 
         try {
+            // ★ Phase 3：備份機制 — 匯入前先將現有資料複製到 inventory_archive
+            const archiveId = 'ARCHIVE_' + new Date().toISOString().replace(/[:.]/g, '-');
+            const archiveBatches = [];
+            let archiveBatch = writeBatch(db);
+            let archiveCount = 0;
+            this.data.inventory.forEach(item => {
+                if (item.Property_ID === '_SETTINGS_') return;
+                archiveBatch.set(doc(db, 'inventory_archive', archiveId + '_' + item.Property_ID), {
+                    ...item,
+                    _Archive_ID: archiveId,
+                    _Archived_At: new Date().toISOString()
+                });
+                archiveCount++;
+                if (archiveCount % 400 === 0) {
+                    archiveBatches.push(archiveBatch.commit());
+                    archiveBatch = writeBatch(db);
+                }
+            });
+            if (archiveCount % 400 !== 0) archiveBatches.push(archiveBatch.commit());
+            await Promise.all(archiveBatches);
+            console.log(`[Phase 3] 已備份 ${archiveCount} 筆產編至 inventory_archive (${archiveId})`);
+
             const batchArray = [];
             let currentBatch = writeBatch(db);
             let count = 0;

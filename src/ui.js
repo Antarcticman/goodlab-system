@@ -1,0 +1,143 @@
+/**
+ * GOODLAB — UI 共用模組
+ * 將 shared.js 的邏輯搬入 src 目錄，並整合 script.js 中散落的 UI 工具。
+ */
+import { LOCATIONS, LOCATIONS_WITH_OTHER } from './constants.js';
+
+// === 通知系統 ===
+export function showNotification(msg, type = 'info', duration = 3000) {
+    showToast(msg, type, duration);
+}
+
+export function showToast(msg, type = 'info', duration = 3000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px;';
+        document.body.appendChild(container);
+    }
+
+    const iconMap = {
+        success: '<i class="ph-fill ph-check-circle" style="color:#22c55e"></i>',
+        error: '<i class="ph-fill ph-x-circle" style="color:#ef4444"></i>',
+        warning: '<i class="ph-fill ph-warning-circle" style="color:#f59e0b"></i>',
+        info: '<i class="ph-fill ph-info" style="color:#3b82f6"></i>'
+    };
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<span class="toast-icon">${iconMap[type] || ''}</span><span>${msg}</span>`;
+    toast.style.cssText = 'display:flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;background:#1e293b;color:#f1f5f9;box-shadow:0 4px 12px rgba(0,0,0,0.2);font-size:0.95rem;opacity:0;transform:translateX(60px);transition:all .3s ease;min-width:240px;max-width:420px;';
+    
+    container.appendChild(toast);
+    requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(0)';
+    });
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(60px)';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// === Modal 操作 ===
+export function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) modal.classList.add('hidden');
+}
+
+export function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (modal) modal.classList.remove('hidden');
+}
+
+// === 通用表格渲染器 ===
+export function renderTable({ tbody, data, emptyText, renderRow, colSpan }) {
+    if (!tbody) return;
+    if (!data || data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${colSpan || 6}" class="empty" style="text-align:center; padding:20px;">${emptyText || '暫無資料'}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = data.map(renderRow).join('');
+}
+
+// === 共用下拉選單填充 ===
+export function populateLocationSelects() {
+    const ids = [
+        'Inst_Location', 'Log_Location', 'Log_Location_Filter',
+        'filter-location', 'Link_Location', 'filter-inv-location'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        const isFilter = id.startsWith('filter') || id === 'Log_Location_Filter';
+        const list = isFilter ? LOCATIONS_WITH_OTHER : LOCATIONS;
+        const firstOpt = isFilter
+            ? '<option value="">全部區域</option>'
+            : '<option value="">（請選擇區域）</option>';
+
+        el.innerHTML = firstOpt + list.map(loc => `<option value="${loc}">${loc}</option>`).join('');
+    });
+}
+
+export function fillMemberSelect(selectId, members) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    if (!members || members.length === 0) {
+        select.innerHTML = '<option value="">(讀取中或無成員資料)</option>';
+        return;
+    }
+
+    let activeMembers = members.filter(m => m.Status === 'Active');
+    if (activeMembers.length === 0) activeMembers = members;
+
+    const options = activeMembers.map(m =>
+        `<option value="${m.Student_ID}">${m.Name_Ch} (${m.Student_ID})</option>`
+    ).join('');
+
+    select.innerHTML = '<option value="">(請選擇人員)</option>' + options;
+}
+
+export function fillPayerSelect(selectId, members) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const memberOpts = members.filter(m => m.Status === 'Active').map(m =>
+        `<option value="${m.Student_ID}">${m.Name_Ch}</option>`
+    ).join('');
+    select.innerHTML = `<option value="Fund">🏦 公積金戶頭 (Fund)</option>` + memberOpts;
+}
+
+// === 複製到剪貼簿 ===
+export function copyEmail(emails) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(emails).then(() => {
+            showNotification('已複製到剪貼簿！', 'success');
+        }).catch(() => {
+            fallbackCopy(emails);
+        });
+    } else {
+        fallbackCopy(emails);
+    }
+}
+
+function fallbackCopy(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+        document.execCommand('copy');
+        showNotification('已複製到剪貼簿！', 'success');
+    } catch (e) {
+        showNotification('複製失敗，請手動複製。', 'error');
+    }
+    document.body.removeChild(textarea);
+}
