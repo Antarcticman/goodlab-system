@@ -8,6 +8,62 @@ import { showNotification, closeModal, fillPayerSelect } from './ui.js';
 
 export const accountingModule = {
 
+    getAccountingSummary: function() {
+        let bankBalance = 0;
+        let cashBalance = 0;
+        let payable = 0;
+        let receivable = 0;
+
+        this.data.accounting.forEach(acc => {
+            const amt = Math.abs(parseFloat(acc.Amount) || 0);
+            const type = acc.Type;
+            const source = acc.Fund_Source || 'Bank';
+            const isFund = acc.Payer === 'Fund';
+            const isRecharged = Boolean(acc.Recharge_Date);
+            const isPaidBack = Boolean(acc.Payback_Date);
+
+            if (!isFund && !isPaidBack && (type === 'School' || type === 'Lab')) payable += amt;
+            if (type === 'School' && !isRecharged) receivable += amt;
+
+            if (type === 'Income' || type === 'Deposit') {
+                if (source === 'Cash') cashBalance += amt;
+                else bankBalance += amt;
+            } else if (type === 'Withdraw' || type === 'Withdrawal') {
+                bankBalance -= amt;
+                cashBalance += amt;
+            } else if (type === 'School' || type === 'Lab') {
+                if (isFund || (!isFund && isPaidBack)) {
+                    if (source === 'Cash') cashBalance -= amt;
+                    else bankBalance -= amt;
+                }
+                if (type === 'School' && isRecharged) bankBalance += amt;
+            }
+        });
+
+        return {
+            bankBalance,
+            cashBalance,
+            totalBalance: bankBalance + cashBalance,
+            payable,
+            receivable
+        };
+    },
+
+    getDebtSummary: function() {
+        const debts = new Map();
+        this.data.accounting.forEach(acc => {
+            const isDebt = acc.Payer !== 'Fund'
+                && !acc.Payback_Date
+                && (acc.Type === 'School' || acc.Type === 'Lab');
+            if (!isDebt) return;
+            const name = getMemberName(this.data.members, acc.Payer);
+            debts.set(name, (debts.get(name) || 0) + Math.abs(parseFloat(acc.Amount) || 0));
+        });
+        return [...debts.entries()]
+            .map(([name, amount]) => ({ name, amount }))
+            .sort((a, b) => b.amount - a.amount);
+    },
+
     // === 篩選控制 ===
     setAccFilter: function(status) {
         this.accFilterStatus = status;
@@ -24,79 +80,42 @@ export const accountingModule = {
 
     // === 計算儀表板數字 (相容舊資料版) ===
     calcDashboard: function() {
-        let bankBalance = 0; // 戶頭
-        let cashBalance = 0; // 現金
-        let payable = 0;     // 待還代墊
-        let receivable = 0;  // 等待回沖
-
-        this.data.accounting.forEach(acc => {
-            const amt = Math.abs(parseFloat(acc.Amount) || 0);
-            const type = acc.Type;
-            const payer = acc.Payer;
-            // 舊資料沒有分戶頭/現金，預設全部視為放在銀行
-            const source = acc.Fund_Source || 'Bank'; 
-
-            const isFund = (payer === 'Fund');
-            const isRecharged = !!acc.Recharge_Date;
-            const isPaidBack = !!acc.Payback_Date;
-
-            // --- 狀態統計 ---
-            if (!isFund && !isPaidBack && (type === 'School' || type === 'Lab')) {
-                payable += amt;
-            }
-            if (type === 'School' && !isRecharged) {
-                receivable += amt;
-            }
-
-            // --- 餘額計算 (★ 關鍵修復：加入 Deposit 與 Withdrawal 支援) ---
-            if (type === 'Income' || type === 'Deposit') {
-                if (source === 'Cash') cashBalance += amt;
-                else bankBalance += amt;
-            } 
-            else if (type === 'Withdraw' || type === 'Withdrawal') {
-                bankBalance -= amt; 
-                cashBalance += amt; 
-            } 
-            else if (type === 'School' || type === 'Lab') {
-                if (isFund || (!isFund && isPaidBack)) {
-                    if (source === 'Cash') cashBalance -= amt;
-                    else bankBalance -= amt;
-                }
-                if (type === 'School' && isRecharged) {
-                    bankBalance += amt;
-                }
-            }
-        });
-
-        const totalBalance = bankBalance + cashBalance;
-        document.getElementById('val-balance').innerText = "$" + totalBalance.toLocaleString();
-        document.getElementById('val-bank').innerText = "$" + bankBalance.toLocaleString();
-        document.getElementById('val-cash').innerText = "$" + cashBalance.toLocaleString();
-        document.getElementById('val-payable').innerText = "$" + payable.toLocaleString();
-        document.getElementById('val-receivable').innerText = "$" + receivable.toLocaleString();
+        const summary = this.getAccountingSummary();
+        const setCurrency = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) element.innerText = "$" + value.toLocaleString('zh-TW');
+        };
+        setCurrency('val-balance', summary.totalBalance);
+        setCurrency('val-bank', summary.bankBalance);
+        setCurrency('val-cash', summary.cashBalance);
+        setCurrency('val-payable', summary.payable);
+        setCurrency('val-receivable', summary.receivable);
     },
 
-    // 顯示欠款明細 (Alert 簡易版)
+    // 顯示欠款明細（持久對話框）
     showDebtsDetail: function() {
-        const debts = {};
-        this.data.accounting.forEach(acc => {
-            if (acc.Payer !== 'Fund' && !acc.Payback_Date) {
-                const name = getMemberName(this.data.members, acc.Payer);
-                debts[name] = (debts[name] || 0) + Math.abs(acc.Amount);
-            }
-        });
-        
-        if (Object.keys(debts).length === 0) {
-            showNotification("目前沒有欠任何人錢！🎉", 'success');
-            return;
-        }
+        const rows = this.getDebtSummary();
+        const tbody = document.getElementById('debt-detail-tbody');
+        const total = document.getElementById('debt-detail-total');
+        const modal = document.getElementById('debt-detail-modal');
+        if (!tbody || !total || !modal) return;
 
-        let msg = "<strong>待還款明細：</strong><br>";
-        for (let [name, amt] of Object.entries(debts)) {
-            msg += `${name}: $${amt}<br>`;
-        }
-        // 第三個參數 5000 代表這則通知會停留 5 秒讓你看清楚
-        showNotification(msg, 'info', 5000); 
+        const escapeText = value => String(value ?? '').replace(/[&<>'"]/g, character => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        })[character]);
+        tbody.innerHTML = rows.length
+            ? rows.map(item => `<tr><td>${escapeText(item.name)}</td><td class="debt-amount">$${item.amount.toLocaleString('zh-TW')}</td></tr>`).join('')
+            : '<tr><td colspan="2" class="empty">目前沒有待還款紀錄</td></tr>';
+        total.textContent = `$${rows.reduce((sum, item) => sum + item.amount, 0).toLocaleString('zh-TW')}`;
+        modal.classList.remove('hidden');
+    },
+
+    showDebtTransactions: function() {
+        this.closeModal('debt-detail-modal');
+        this.setAccFilter('Debt');
+        const table = document.getElementById('acc-tbody');
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (table) table.closest('.table-container')?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
     },
 
     renderAccounting: function() {
@@ -122,7 +141,7 @@ export const accountingModule = {
             const payerName = getMemberName(this.data.members, acc.Payer);
             const text = (acc.Description + payerName + acc.Type).toLowerCase();
             if (!text.includes(term)) return false;
-            const isDebt = (acc.Payer !== 'Fund' && !acc.Payback_Date);
+            const isDebt = (acc.Payer !== 'Fund' && !acc.Payback_Date && (acc.Type === 'School' || acc.Type === 'Lab'));
             const isWait = (acc.Type === 'School' && !acc.Recharge_Date);
             if (filter === 'Debt') return isDebt;
             if (filter === 'Wait') return isWait;

@@ -9,10 +9,15 @@
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+    <button class="skip-link" type="button" onclick="document.getElementById('main-content').focus()">跳到主要內容</button>
     <div class="app-layout">
         <aside class="sidebar">
-            <div class="sidebar-header">GOODLAB <span style="font-size: 0.7rem; color: var(--primary);">PRO</span></div>
+            <div class="sidebar-header">
+                <span class="brand-mark">GOODLAB</span>
+                <span class="brand-subtitle">實驗室管理系統</span>
+            </div>
             <nav class="sidebar-nav">
+                <button id="nav-btn-overview" class="nav-item" onclick="app.switchTab('overview')"><i class="ph ph-squares-four" aria-hidden="true"></i> 總覽</button>
                 <div class="nav-group-label">日常管理</div>
                 <button id="nav-btn-logs" class="nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench"></i> 維修紀錄</button>
                 <button id="nav-btn-routine" class="nav-item" onclick="app.switchTab('routine')"><i class="ph ph-arrows-clockwise"></i> 實驗室 Routine</button>
@@ -27,25 +32,52 @@
             </nav>
         </aside>
 
-        <main class="main-content">
-            <header class="top-bar" style="display: flex; justify-content: flex-end; align-items: center; padding: 12px 24px; background: var(--bg-card); border-bottom: 1px solid var(--border-color); min-height: 60px; position: sticky; top: 0; z-index: 10;">
-                <div id="auth-zone" style="display: flex; align-items: center; gap: 15px;">
-                    <div id="user-info" style="font-size: 0.9rem; color: var(--text-main); font-weight: 500;"></div>
+        <main class="main-content" id="main-content" tabindex="-1">
+            <header class="top-bar">
+                <div class="top-bar-title">
+                    <span class="top-bar-eyebrow">GOODLAB</span>
+                    <h1 id="current-page-title">歡迎</h1>
+                </div>
+                <div id="auth-zone" class="auth-zone">
+                    <div id="user-info" class="user-info" aria-live="polite"></div>
                     
-                    <button id="btn-login" class="btn btn-primary btn-sm" onclick="app.login()" style="display: flex; align-items: center; gap: 6px;">
-                        <i class="ph ph-google-logo"></i> Google 登入
+                    <button id="btn-login" class="btn btn-primary" onclick="app.login()">
+                        <i class="ph ph-google-logo" aria-hidden="true"></i> Google 登入
                     </button>
                     
-                    <button id="btn-logout" class="btn btn-secondary btn-sm hidden" onclick="app.logout()" style="display: flex; align-items: center; gap: 6px;">
-                        <i class="ph ph-sign-out"></i> 系統登出
+                    <button id="btn-logout" class="btn btn-secondary hidden" onclick="app.logout()">
+                        <i class="ph ph-sign-out" aria-hidden="true"></i> 系統登出
                     </button>
                 </div>
             </header>
 
             <div class="page-container">
-                <section id="page-members" class="page-section active">
+                <section id="page-welcome" class="page-section active" aria-labelledby="welcome-title">
+                    <div class="welcome-shell">
+                        <div class="welcome-copy">
+                            <h2 id="welcome-title">GOODLAB 實驗室管理系統</h2>
+                            <p>登入後即可依權限查看值日工作、維修紀錄、儀器狀態、產編清點與行政資料。</p>
+                            <button class="btn btn-primary btn-lg" onclick="app.login()">
+                                <i class="ph ph-google-logo" aria-hidden="true"></i>
+                                使用 Google 帳號登入
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="page-overview" class="page-section" aria-labelledby="overview-title">
+                    <div class="page-heading">
+                        <div>
+                            <h2 id="overview-title">實驗室總覽</h2>
+                            <p id="overview-greeting">載入你的工作摘要中...</p>
+                        </div>
+                    </div>
+                    <div id="overview-content" class="overview-content" aria-live="polite"></div>
+                </section>
+
+                <section id="page-members" class="page-section">
                     <div class="action-bar">
-                        <div class="filters"><input type="text" id="search-member" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()" style="width:100%;"></div>
+                        <div class="filters"><input type="text" id="search-member" aria-label="搜尋成員姓名或學號" placeholder="搜尋姓名、學號..." oninput="app.renderMembers()" style="width:100%;"></div>
                         <button onclick="app.openMemberModal()" class="btn btn-primary admin-only">新增成員</button>
                     </div>
                     <div class="table-container">
@@ -68,8 +100,8 @@
                 <section id="page-instruments" class="page-section">
                     <div class="action-bar">
                         <div class="filters">
-                            <input type="text" id="search-inst" placeholder="搜尋儀器名稱..." oninput="app.renderInstruments()">
-                            <select id="filter-inst-location" onchange="app.renderInstruments()">
+                            <input type="text" id="search-inst" aria-label="搜尋儀器名稱" placeholder="搜尋儀器名稱..." oninput="app.renderInstruments()">
+                            <select id="filter-inst-location" aria-label="依實驗區域篩選儀器" onchange="app.renderInstruments()">
                                 <option value="">所有區域</option>
                                 <option value="多腔體區">多腔體區</option>
                                 <option value="機房">機房</option>
@@ -102,7 +134,7 @@
                 <section id="page-logs" class="page-section">
                     <div class="action-bar">
                         <div class="filters">
-                            <input type="text" id="search-log" placeholder="搜尋問題..." oninput="app.renderLogs()">
+                            <input type="text" id="search-log" aria-label="搜尋維修問題" placeholder="搜尋問題..." oninput="app.renderLogs()">
                             <div class="filter-group">
                                 <button class="btn-filter filter-chip" data-val="All" onclick="app.setLogFilter('All')">全部</button>
                                 <button class="btn-filter filter-chip active" data-val="Open" onclick="app.setLogFilter('Open')">待處理</button>
@@ -143,22 +175,24 @@
                             </div>
                         </div>
                         
-                        <div class="dashboard-card" style="border-left: 4px solid var(--danger); cursor: pointer; transition: 0.2s;" onclick="app.showDebtsDetail()" onmouseover="this.style.transform='translateY(-2px)';" onmouseout="this.style.transform='translateY(0)';">
+                        <button type="button" class="dashboard-card dashboard-card-button" onclick="app.showDebtsDetail()" aria-describedby="debt-card-help">
                             <div style="color:var(--danger); font-size:0.85rem; display:flex; justify-content:space-between;">待還代墊款 <i class="ph ph-hand-coins" style="font-size:1.1rem;"></i></div>
                             <div id="val-payable" style="font-size:1.6rem; font-weight:bold; color:var(--danger);">...</div>
-                            <div style="font-size:0.75rem; color:var(--secondary); margin-top:4px;">點擊查看欠款明細</div>
-                        </div>
-                        
-                        <div class="dashboard-card" style="border-left: 4px solid var(--warning); cursor: pointer; transition: 0.2s;" onclick="window.open('https://ntuacc.cc.ntu.edu.tw/acc/index.asp?campno=m&idtype=3', '_blank')" onmouseover="this.style.transform='translateY(-2px)';" onmouseout="this.style.transform='translateY(0)';">
+                            <div id="debt-card-help" style="font-size:0.75rem; color:var(--secondary); margin-top:4px;">查看各成員待還款金額</div>
+                        </button>
+
+                        <div class="dashboard-card accounting-portal-card">
                             <div style="color:var(--warning); font-size:0.85rem; display:flex; justify-content:space-between;">待學校回沖 <i class="ph ph-arrow-square-out" style="font-size:1.1rem;"></i></div>
                             <div id="val-receivable" style="font-size:1.6rem; font-weight:bold; color:var(--warning);">...</div>
-                            <div style="font-size:0.75rem; color:var(--secondary); margin-top:4px;">點擊前往報帳系統</div>
+                            <a class="btn btn-secondary btn-sm accounting-portal-link" href="https://ntuacc.cc.ntu.edu.tw/acc/index.asp?campno=m&amp;idtype=3" target="_blank" rel="noopener noreferrer">
+                                開啟臺大帳務系統 <i class="ph ph-arrow-square-out" aria-hidden="true"></i>
+                            </a>
                         </div>
                     </div>
 
                     <div class="action-bar">
                         <div class="filters">
-                            <input type="text" id="search-acc" placeholder="搜尋項目..." oninput="app.renderAccounting()">
+                            <input type="text" id="search-acc" aria-label="搜尋帳務項目" placeholder="搜尋項目..." oninput="app.renderAccounting()">
                             <div class="filter-group">
                                 <button class="btn-filter filter-chip active" data-acc-val="All" onclick="app.setAccFilter('All')">全部</button>
                                 <button class="btn-filter filter-chip" data-acc-val="Wait" onclick="app.setAccFilter('Wait')">未回沖</button>
@@ -189,8 +223,8 @@
                 <section id="page-inventory" class="page-section">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                         <div style="display:flex; gap:10px; align-items:center;">
-                            <input type="text" id="search-inv" placeholder="搜尋產編..." oninput="app.renderInventory()" style="width:200px;">
-                            <select id="filter-inv-location" onchange="app.renderInventory()" style="width: 150px;">
+                            <input type="text" id="search-inv" aria-label="搜尋財產編號或名稱" placeholder="搜尋產編..." oninput="app.renderInventory()" style="width:200px;">
+                            <select id="filter-inv-location" aria-label="依實驗區域篩選財產" onchange="app.renderInventory()" style="width: 150px;">
                                 <option value="">所有區域</option>
                                 <option value="多腔體區">多腔體區</option>
                                 <option value="機房">機房</option>
@@ -208,7 +242,7 @@
                             </div>
                         </div>
                         <div style="display:flex; gap:10px;">
-                            <input type="file" id="excel-upload" accept=".xlsx, .xls" style="display: none;" onchange="app.previewExcel(event)">
+                            <input type="file" id="excel-upload" aria-label="選擇財產清冊 Excel 檔案" accept=".xlsx, .xls" style="display: none;" onchange="app.previewExcel(event)">
                             <button onclick="document.getElementById('excel-upload').click()" class="btn btn-secondary admin-only"><i class="ph ph-upload-simple"></i> 匯入</button>
                             <button onclick="app.exportInventoryExcel()" class="btn btn-secondary admin-only" style="color: var(--success); border-color: var(--success);"><i class="ph ph-download-simple"></i> 匯出清冊</button>
                         </div>
@@ -264,12 +298,13 @@
             </div>
         </main>
 
-        <!-- 手機底部導覽列 (Phase 5: 3常用 + 更多) -->
-        <nav class="mobile-nav">
-            <button class="mobile-nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench"></i> <span>維修</span></button>
-            <button class="mobile-nav-item" onclick="app.switchTab('duty')"><i class="ph ph-broom"></i> <span>值日</span></button>
-            <button class="mobile-nav-item" onclick="app.switchTab('accounting')"><i class="ph ph-currency-circle-dollar"></i> <span>公積金</span></button>
-            <button class="mobile-nav-item" id="mobile-more-btn" onclick="app.toggleMobileMore()"><i class="ph ph-dots-three-outline"></i> <span>更多</span></button>
+        <!-- 手機底部導覽列：4 個核心目的地 + 更多 -->
+        <nav class="mobile-nav" aria-label="主要功能">
+            <button class="mobile-nav-item" onclick="app.switchTab('overview')"><i class="ph ph-squares-four" aria-hidden="true"></i> <span>總覽</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('logs')"><i class="ph ph-wrench" aria-hidden="true"></i> <span>維修</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('duty')"><i class="ph ph-broom" aria-hidden="true"></i> <span>值日</span></button>
+            <button class="mobile-nav-item" onclick="app.switchTab('inventory')"><i class="ph ph-list-checks" aria-hidden="true"></i> <span>產編</span></button>
+            <button class="mobile-nav-item" id="mobile-more-btn" onclick="app.toggleMobileMore()" aria-expanded="false" aria-controls="mobile-more-drawer"><i class="ph ph-dots-three-outline" aria-hidden="true"></i> <span>更多</span></button>
         </nav>
 
         <!-- 手機版「更多」抽屜選單 -->
@@ -278,14 +313,15 @@
             <div class="mobile-drawer-content">
                 <div class="mobile-drawer-header">所有功能</div>
                 <div class="mobile-drawer-group">
-                    <div class="mobile-drawer-group-label">📌 日常管理</div>
+                    <div class="mobile-drawer-group-label"><i class="ph ph-clipboard-text" aria-hidden="true"></i> 日常管理</div>
+                    <button onclick="app.switchTab('overview'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-squares-four" aria-hidden="true"></i> 總覽</button>
                     <button onclick="app.switchTab('logs'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-wrench"></i> 維修紀錄</button>
                     <button onclick="app.switchTab('routine'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-arrows-clockwise"></i> 實驗室 Routine</button>
                     <button onclick="app.switchTab('duty'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-broom"></i> 值日生</button>
                     <button onclick="app.switchTab('inventory'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-list-checks"></i> 產編清點</button>
                 </div>
                 <div class="mobile-drawer-group">
-                    <div class="mobile-drawer-group-label">💼 行政資源</div>
+                    <div class="mobile-drawer-group-label"><i class="ph ph-briefcase" aria-hidden="true"></i> 行政資源</div>
                     <button onclick="app.switchTab('accounting'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-currency-circle-dollar"></i> 公積金報帳</button>
                     <button onclick="app.switchTab('members'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-users"></i> 人員管理</button>
                     <button onclick="app.switchTab('employment'); app.toggleMobileMore()" class="mobile-drawer-item"><i class="ph ph-graduation-cap"></i> 學生聘僱</button>
@@ -608,6 +644,33 @@
             <div class="modal-body" id="help-modal-body" style="padding: 20px; line-height: 1.6;"></div>
             <div class="modal-footer">
                 <button onclick="app.closeModal('help-modal')" class="btn btn-primary">了解</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="debt-detail-modal" class="modal hidden">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">
+                <h3>待還款明細</h3>
+                <span class="close" onclick="app.closeModal('debt-detail-modal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p class="modal-intro">以下為成員代墊、實驗室尚未還款的金額。</p>
+                <div class="table-container debt-table-container">
+                    <table>
+                        <thead>
+                            <tr><th>代墊人</th><th style="text-align:right;">待還金額</th></tr>
+                        </thead>
+                        <tbody id="debt-detail-tbody"></tbody>
+                        <tfoot>
+                            <tr><th>合計</th><th id="debt-detail-total" style="text-align:right;">$0</th></tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="app.closeModal('debt-detail-modal')">關閉</button>
+                <button type="button" class="btn btn-primary" onclick="app.showDebtTransactions()">查看未還款紀錄</button>
             </div>
         </div>
     </div>

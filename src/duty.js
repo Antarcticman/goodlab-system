@@ -8,7 +8,7 @@
  *                            submitted: false, submitted_at: null }
  */
 import { db, doc, setDoc, updateDoc } from './firebase.js';
-import { DUTY_CLEANING_TASKS, DUTY_SUPPLY_ITEMS, SUPPLY_VENDORS, DUTY_NOTES, GAS_WEBHOOK_URL } from './constants.js';
+import { DUTY_CLEANING_TASKS, DUTY_SUPPLY_ITEMS, SUPPLY_VENDORS, DUTY_NOTES } from './constants.js';
 
 export const dutyModule = {
 
@@ -116,9 +116,16 @@ export const dutyModule = {
         const isAdmin = this.currentRole === 'Admin';
         const canEdit = isCurrentDuty || isAdmin;
 
-        // 計算下一位
+        // 計算下週值日生；若 Admin 已預先指定，優先顯示指定結果
         const currentIdx = roster.findIndex(m => m.Student_ID === assignedTo);
-        const nextPerson = roster[(currentIdx + 1) % roster.length];
+        const nextWeekDate = new Date();
+        nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+        const nextWeekId = this._getDutyWeekId(nextWeekDate);
+        const nextWeekRecord = this.data.duty_records.find(r => r._id === nextWeekId);
+        const calculatedNextPerson = roster[(currentIdx + 1) % roster.length];
+        const nextPerson = nextWeekRecord?.assigned_to
+            ? roster.find(m => m.Student_ID === nextWeekRecord.assigned_to) || calculatedNextPerson
+            : calculatedNextPerson;
 
         // 代班 Banner
         let substituteBanner = '';
@@ -217,17 +224,22 @@ export const dutyModule = {
             </button>`;
         }
 
+        const nextDutyButtonHtml = isAdmin
+            ? `<button class="btn btn-secondary btn-sm" onclick="app.openNextDutyModal()"><i class="ph ph-calendar-plus" aria-hidden="true"></i> 設定下週值日生</button>`
+            : '';
+
         container.innerHTML = `
             ${substituteBanner}
             
             <div class="duty-card">
                 <div class="duty-card-header">
                     <h3><i class="ph ph-calendar-check" style="color:var(--primary);"></i> 本週值日生：${member.Name_Ch}</h3>
-                    ${subBtnHtml}
+                    <div class="toolbar-actions">${subBtnHtml}${nextDutyButtonHtml}</div>
                 </div>
                 <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:center;">
                     <div><strong>週期：</strong>${weekId} 起</div>
-                    <div><strong>下一位：</strong>${nextPerson ? nextPerson.Name_Ch : '-'}</div>
+                    <div><strong>下週值日生：</strong>${nextPerson ? nextPerson.Name_Ch : '-'}</div>
+                    ${nextWeekRecord?.assigned_to ? '<span class="status-badge status-badge-info">已指定</span>' : '<span class="status-badge">依輪值推算</span>'}
                 </div>
             </div>
 
@@ -310,42 +322,99 @@ export const dutyModule = {
             });
             this.showNotification('✅ 本週值日生工作已提交！', 'success');
 
-            // --- Phase 5: 寄信給全體實驗室公告交接 ---
-            if (GAS_WEBHOOK_URL) {
-                const roster = this._getDutyRoster();
-                const currentIdx = roster.findIndex(m => m.Student_ID === record.assigned_to);
-                const nextPerson = roster[(currentIdx + 1) % roster.length];
-                const personName = this.currentMember ? this.currentMember.Name_Ch : record.assigned_to;
-                
-                const allEmails = this.data.members
-                    .filter(m => m.Status === 'Active' && m.Email)
-                    .map(m => m.Email)
-                    .join(',');
-
-                const payload = {
-                    to: allEmails,
-                    subject: `【GOODLAB 公告】本週值日生已完成，下週為 ${nextPerson ? nextPerson.Name_Ch : '未知'}`,
-                    body: `
-                        <div style="font-family: sans-serif; line-height: 1.6; color: #333;">
-                            <h2 style="color: #059669;">✅ 值日生交接公告</h2>
-                            <p>Hi 大家：</p>
-                            <p>本週值日生 <b>${personName}</b> 已完成一般清潔與耗材清點工作！</p>
-                            <p>👉 <b>下週值日生輪到：${nextPerson ? nextPerson.Name_Ch : '-'}</b></p>
-                            <p>請下週負責人記得登入系統確認並執行任務。</p>
-                        </div>
-                    `
-                };
-
-                fetch(GAS_WEBHOOK_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                }).catch(e => console.error("Webhook error:", e));
-            }
-
         } catch (e) {
             this.showNotification('❌ 提交失敗: ' + e.message, 'error');
+        }
+    },
+
+    // === Admin 預先指定下週值日生 ===
+    openNextDutyModal: function() {
+        if (this.currentRole !== 'Admin') return;
+        const roster = this._getDutyRoster();
+        if (!roster.length) {
+            this.showNotification('目前沒有可排班的碩班成員', 'warning');
+            return;
+        }
+
+        const nextWeekDate = new Date();
+        nextWeekDate.setDate(nextWeekDate.getDate() + 7);
+        const nextWeekId = this._getDutyWeekId(nextWeekDate);
+        const existing = this.data.duty_records.find(record => record._id === nextWeekId);
+        const currentResult = this._getCurrentDutyPerson();
+        const currentIndex = currentResult
+            ? roster.findIndex(member => member.Student_ID === currentResult.assignedTo)
+            : -1;
+        const suggestedId = existing?.assigned_to
+            || roster[(currentIndex + 1 + roster.length) % roster.length]?.Student_ID
+            || roster[0].Student_ID;
+        const options = roster.map(member =>
+            `<option value="${member.Student_ID}" ${member.Student_ID === suggestedId ? 'selected' : ''}>${member.Name_Ch}</option>`
+        ).join('');
+
+        document.getElementById('next-duty-modal')?.remove();
+        this.modalReturnFocus?.delete('next-duty-modal');
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'next-duty-modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width:440px;">
+                <div class="modal-header">
+                    <h3>設定下週值日生</h3>
+                    <span class="close" onclick="app.closeModal('next-duty-modal')">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-intro">適用週次：${nextWeekId} 起。儲存後，下週會優先使用這個指定結果。</p>
+                    <div class="form-group">
+                        <label for="next-duty-assignee">值日生</label>
+                        <select id="next-duty-assignee">${options}</select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="app.closeModal('next-duty-modal')">取消</button>
+                    <button class="btn btn-primary" id="btn-save-next-duty" onclick="app.saveNextDutyAssignment('${nextWeekId}')">儲存</button>
+                </div>
+            </div>`;
+        document.body.appendChild(modal);
+    },
+
+    saveNextDutyAssignment: async function(nextWeekId) {
+        if (this.currentRole !== 'Admin') return;
+        const assignedTo = document.getElementById('next-duty-assignee')?.value;
+        if (!assignedTo) return;
+        const existing = this.data.duty_records.find(record => record._id === nextWeekId);
+        const button = document.getElementById('btn-save-next-duty');
+
+        const cleaning = {};
+        DUTY_CLEANING_TASKS.forEach(task => { cleaning[task.id] = false; });
+        const supplies = {};
+        DUTY_SUPPLY_ITEMS.forEach(item => { supplies[item.id] = false; });
+        const payload = existing ? {
+            assigned_to: assignedTo,
+            week_start: nextWeekId,
+            updated_at: new Date().toISOString()
+        } : {
+            week_start: nextWeekId,
+            assigned_to: assignedTo,
+            substitute_pending: null,
+            substitute_from: null,
+            cleaning,
+            supplies,
+            submitted: false,
+            submitted_at: null,
+            updated_at: new Date().toISOString()
+        };
+
+        button.disabled = true;
+        button.textContent = '儲存中...';
+        try {
+            await setDoc(doc(db, 'duty_records', nextWeekId), payload, { merge: true });
+            this.closeModal('next-duty-modal');
+            this.showNotification('已設定下週值日生', 'success');
+        } catch (error) {
+            this.showNotification('設定失敗：' + error.message, 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = '儲存';
         }
     },
 

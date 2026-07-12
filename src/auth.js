@@ -28,8 +28,21 @@ export const authModule = {
     // === 監聽登入狀態 ===
     setupAuthListener: function() {
         onAuthStateChanged(auth, (user) => {
+            const previousUid = this.currentUser ? this.currentUser.uid : null;
             this.currentUser = user;
-            this.checkUserRole(); // 狀態改變時，交給中控室檢查
+            this.currentMember = null;
+            this.currentRole = 'Guest';
+
+            if (user) {
+                if (previousUid !== user.uid) this.membersLoaded = false;
+                this.syncRealtimeListeners('Guest');
+            } else {
+                this.membersLoaded = false;
+                this.data.members = [];
+                this.syncRealtimeListeners('Anonymous');
+            }
+
+            this.checkUserRole();
         });
     },
 
@@ -42,16 +55,22 @@ export const authModule = {
         // 1. 完全沒登入 Google
         if (!this.currentUser) {
             this.currentRole = 'Guest';
-            if(userInfo) userInfo.innerText = ""; // 沒登入不顯示文字
+            this.currentMember = null;
+            if(userInfo) userInfo.innerText = "";
             if(btnLogin) btnLogin.classList.remove('hidden');
             if(btnLogout) btnLogout.classList.add('hidden');
             this.updateSidebarUI();
-            this.switchTab('members'); // 強制待在人員頁面
+            this.switchTab('welcome');
             return;
         }
 
-        // 2. 登入中但資料還沒跑完，維持安靜
-        if (!this.membersLoaded) return;
+        // 2. 登入中但成員資料還沒跑完
+        if (!this.membersLoaded) {
+            if(userInfo) userInfo.innerText = "正在確認使用權限...";
+            if(btnLogin) btnLogin.classList.add('hidden');
+            if(btnLogout) btnLogout.classList.remove('hidden');
+            return;
+        }
 
         // 3. 已經登入 Google，切換按鈕
         if(btnLogin) btnLogin.classList.add('hidden');
@@ -63,18 +82,28 @@ export const authModule = {
             // 已綁定成功 (User / Admin)
             this.currentRole = memberData.Role || 'User';
             this.currentMember = memberData; // Phase 5: 儲存完整 member 資料
-            if(userInfo) userInfo.innerText = `👤 ${memberData.Name_Ch} (${this.currentRole})`;
+            const roleLabel = this.currentRole === 'Admin' ? '管理員' : '成員';
+            if(userInfo) userInfo.innerText = `${memberData.Name_Ch} · ${roleLabel}`;
             closeModal('bind-modal');
+            this.syncRealtimeListeners(this.currentRole);
         } else {
             // 已登入但未綁定學號 ➔ 視為 Guest
             this.currentRole = 'Guest';
-            if(userInfo) userInfo.innerText = `👤 ${this.currentUser.displayName} (未認證)`;
-            this.switchTab('members');
+            this.currentMember = null;
+            if(userInfo) userInfo.innerText = `${this.currentUser.displayName || 'Google 使用者'} · 尚未綁定`;
+            this.syncRealtimeListeners('Guest');
+            this.switchTab('welcome');
             // 彈出強制綁定視窗
             const bindModal = document.getElementById('bind-modal');
             if (bindModal) bindModal.classList.remove('hidden');
         }
         this.updateSidebarUI();
+        if (this.currentMember) {
+            const activePage = document.querySelector('.page-section.active');
+            const activeTab = activePage ? activePage.id.replace('page-', '') : '';
+            if (!this.getAllowedTabs().includes(activeTab) || activeTab === 'welcome') this.routeFromHash();
+            this.renderOverview();
+        }
     },
 
     // === 自訂綁定視窗邏輯：取消綁定 ===
@@ -136,14 +165,15 @@ export const authModule = {
 
     // === 側邊欄與手機 UI 動態控制 (Phase 5: 8 頁面) ===
     updateSidebarUI: function() {
+        document.body.classList.toggle('guest-mode', this.currentRole === 'Guest');
         // 定義所有導覽按鈕 [桌面版ID, 手機版selector]
-        const navIds = ['logs', 'routine', 'duty', 'inventory', 'accounting', 'members', 'employment', 'instruments'];
+        const navIds = ['overview', 'logs', 'routine', 'duty', 'inventory', 'accounting', 'members', 'employment', 'instruments'];
         
         const navMap = {};
         navIds.forEach(id => {
             navMap[id] = [
                 document.getElementById('nav-btn-' + id),
-                document.querySelector('.mobile-nav-item[onclick*="' + id + '"]')
+                ...document.querySelectorAll('.mobile-nav-item[onclick*="' + id + '"], .mobile-drawer-item[onclick*="' + id + '"]')
             ];
         });
 
@@ -158,8 +188,8 @@ export const authModule = {
                 arr.forEach(el => { if(el) el.style.display = 'flex'; }); 
             });
         } else if (this.currentRole === 'User') {
-            // User：可看「儀器」「產編」「值日生」「人員」
-            ['instruments', 'inventory', 'duty', 'members'].forEach(id => {
+            // User：可看總覽、儀器、維修、產編、值日生與人員
+            ['overview', 'instruments', 'logs', 'inventory', 'duty', 'members'].forEach(id => {
                 navMap[id].forEach(el => { if(el) el.style.display = 'flex'; });
             });
         }

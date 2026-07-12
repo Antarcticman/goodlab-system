@@ -14,7 +14,9 @@ export function showToast(msg, type = 'info', duration = 3000) {
     if (!container) {
         container = document.createElement('div');
         container.id = 'toast-container';
-        container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px;';
+        container.className = 'toast-container';
+        container.setAttribute('aria-live', 'polite');
+        container.setAttribute('aria-atomic', 'false');
         document.body.appendChild(container);
     }
 
@@ -26,19 +28,19 @@ export function showToast(msg, type = 'info', duration = 3000) {
     };
 
     const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.innerHTML = `<span class="toast-icon">${iconMap[type] || ''}</span><span>${msg}</span>`;
-    toast.style.cssText = 'display:flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;background:#1e293b;color:#f1f5f9;box-shadow:0 4px 12px rgba(0,0,0,0.2);font-size:0.95rem;opacity:0;transform:translateX(60px);transition:all .3s ease;min-width:240px;max-width:420px;';
+    toast.className = `toast ${type}`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    toast.innerHTML = `<span class="toast-icon" aria-hidden="true">${iconMap[type] || ''}</span><span class="toast-message"></span>`;
+    toast.querySelector('.toast-message').textContent = msg;
     
     container.appendChild(toast);
     requestAnimationFrame(() => {
-        toast.style.opacity = '1';
-        toast.style.transform = 'translateX(0)';
+        toast.classList.add('is-visible');
     });
 
     setTimeout(() => {
-        toast.style.opacity = '0';
-        toast.style.transform = 'translateX(60px)';
+        toast.classList.remove('is-visible');
+        toast.classList.add('fadeOut');
         setTimeout(() => toast.remove(), 300);
     }, duration);
 }

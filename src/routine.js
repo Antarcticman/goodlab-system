@@ -1,277 +1,335 @@
 /**
- * GOODLAB — 實驗室 Routine 模組 (Phase 5)
- * 
- * 週期性維護任務管理（僅 Admin）。
- * 資料模型：
- *   routines/{id}: { name, category, interval_days, last_done, next_due,
- *                    remind_days: [7, 3, 0], url, notes, created_at }
+ * GOODLAB — 實驗室 Routine 模組
+ *
+ * 資料模型（向下相容 interval_days）：
+ * routines/{id}: {
+ *   name, category, interval_value, interval_unit, interval_days,
+ *   last_done, next_due, remind_days, url, notes, created_at, updated_at
+ * }
  */
 import { db, doc, setDoc, deleteDoc } from './firebase.js';
 import { ROUTINE_CATEGORIES } from './constants.js';
 import { generateId } from './utils.js';
 
+const UNIT_LABELS = { day: '天', month: '月', year: '年' };
+
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>'"]/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    })[character]);
+}
+
+function toLocalDateString(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function parseLocalDate(value) {
+    if (!value) return null;
+    const date = new Date(`${value}T12:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getInterval(routine = {}) {
+    const explicitValue = parseInt(routine.interval_value, 10);
+    const explicitUnit = routine.interval_unit;
+    if (explicitValue > 0 && UNIT_LABELS[explicitUnit]) {
+        return { value: explicitValue, unit: explicitUnit };
+    }
+
+    const legacyDays = Math.max(1, parseInt(routine.interval_days, 10) || 30);
+    if (legacyDays % 365 === 0) return { value: legacyDays / 365, unit: 'year' };
+    if (legacyDays % 30 === 0) return { value: legacyDays / 30, unit: 'month' };
+    return { value: legacyDays, unit: 'day' };
+}
+
+function intervalToDays(value, unit) {
+    if (unit === 'year') return value * 365;
+    if (unit === 'month') return value * 30;
+    return value;
+}
+
+function addInterval(dateValue, routine) {
+    const date = dateValue instanceof Date ? new Date(dateValue) : parseLocalDate(dateValue);
+    if (!date) return '';
+    const { value, unit } = getInterval(routine);
+
+    if (unit === 'day') {
+        date.setDate(date.getDate() + value);
+    } else if (unit === 'month') {
+        const originalDay = date.getDate();
+        date.setDate(1);
+        date.setMonth(date.getMonth() + value);
+        const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+        date.setDate(Math.min(originalDay, lastDay));
+    } else {
+        const originalMonth = date.getMonth();
+        const originalDay = date.getDate();
+        date.setDate(1);
+        date.setFullYear(date.getFullYear() + value);
+        date.setMonth(originalMonth);
+        const lastDay = new Date(date.getFullYear(), originalMonth + 1, 0).getDate();
+        date.setDate(Math.min(originalDay, lastDay));
+    }
+
+    return toLocalDateString(date);
+}
+
 export const routineModule = {
+    routineView: 'overview',
 
-    routineView: 'overview', // 'overview' | 'edit'
+    getUpcomingRoutines: function(limit = 5) {
+        return [...this.data.routines]
+            .filter(routine => routine.next_due)
+            .sort((a, b) => a.next_due.localeCompare(b.next_due))
+            .slice(0, limit);
+    },
 
-    // === 主渲染 ===
+    getRoutineIntervalLabel: function(routine) {
+        const interval = getInterval(routine);
+        return `${interval.value} ${UNIT_LABELS[interval.unit]}`;
+    },
+
     renderRoutine: function() {
         const container = document.getElementById('routine-content');
         if (!container) return;
 
         if (this.currentRole !== 'Admin') {
-            container.innerHTML = `<div style="text-align:center; padding:50px; color:var(--text-muted);">
-                <i class="ph-fill ph-lock-key" style="font-size:3rem; margin-bottom:10px; display:block;"></i>
-                此頁面僅限 Admin 檢視</div>`;
+            container.innerHTML = `<div class="empty-state"><i class="ph-fill ph-lock-key" aria-hidden="true"></i>此頁面僅限 Admin 檢視</div>`;
             return;
         }
 
-        if (this.routineView === 'edit') {
-            this._renderRoutineEdit(container);
-        } else {
-            this._renderRoutineOverview(container);
-        }
+        if (this.routineView === 'edit') this._renderRoutineEdit(container);
+        else this._renderRoutineOverview(container);
     },
 
-    // === 總覽頁 ===
     _renderRoutineOverview: function(container) {
         const routines = this.data.routines;
-        const today = new Date().toISOString().split('T')[0];
-
-        // 依分類分組
+        const today = toLocalDateString(new Date());
         const grouped = {};
-        ROUTINE_CATEGORIES.forEach(cat => { grouped[cat] = []; });
-        routines.forEach(r => {
-            const cat = r.category || '未分類';
-            if (!grouped[cat]) grouped[cat] = [];
-            grouped[cat].push(r);
+        ROUTINE_CATEGORIES.forEach(category => { grouped[category] = []; });
+        routines.forEach(routine => {
+            const category = routine.category || '未分類';
+            if (!grouped[category]) grouped[category] = [];
+            grouped[category].push(routine);
         });
 
         let html = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h2 style="margin:0; font-size:1.3rem;">Routine 總覽</h2>
-            <button class="btn btn-primary btn-sm" onclick="app.routineView='edit'; app.renderRoutine();">
-                <i class="ph ph-pencil-simple"></i> 編輯模式
-            </button>
-        </div>`;
+            <div class="section-toolbar">
+                <h2>Routine 總覽</h2>
+                <button class="btn btn-primary btn-sm" onclick="app.routineView='edit'; app.renderRoutine();">
+                    <i class="ph ph-pencil-simple" aria-hidden="true"></i> 編輯 Routine
+                </button>
+            </div>`;
 
-        Object.keys(grouped).forEach(cat => {
-            if (grouped[cat].length === 0) return;
-
-            html += `<div class="duty-card">
-                <div class="duty-card-header"><h3>${cat}</h3></div>
-                <div class="table-container">
-                <table class="routine-table">
+        Object.entries(grouped).forEach(([category, items]) => {
+            if (!items.length) return;
+            items.sort((a, b) => (a.next_due || '9999-12-31').localeCompare(b.next_due || '9999-12-31'));
+            html += `<div class="duty-card routine-group">
+                <div class="duty-card-header"><h3>${escapeHtml(category)}</h3></div>
+                <div class="table-container"><table class="routine-table">
                     <thead><tr>
-                        <th style="width:40px;"></th>
-                        <th>項目名稱</th>
-                        <th class="hide-mobile">週期</th>
-                        <th>上次完成</th>
-                        <th>下次到期</th>
-                        <th class="hide-mobile">狀態</th>
-                    </tr></thead>
-                    <tbody>`;
+                        <th class="routine-complete-column">完成</th>
+                        <th>項目</th>
+                        <th>週期</th>
+                        <th>上次更新</th>
+                        <th>下次更新</th>
+                        <th>狀態</th>
+                    </tr></thead><tbody>`;
 
-            grouped[cat].forEach(r => {
-                const overdue = r.next_due && r.next_due <= today;
-                const warnDays = r.remind_days || [7, 3, 0];
-                const daysUntil = r.next_due ? Math.ceil((new Date(r.next_due) - new Date()) / 86400000) : null;
-                
-                let statusCls = 'routine-status-ok';
-                let statusText = '✅ 正常';
-                if (overdue) { statusCls = 'routine-status-overdue'; statusText = '🔴 已逾期'; }
-                else if (daysUntil !== null && daysUntil <= warnDays[0]) { statusCls = 'routine-status-warn'; statusText = `⚠️ ${daysUntil} 天後`; }
+            items.forEach(routine => {
+                const dueDate = parseLocalDate(routine.next_due);
+                const todayDate = parseLocalDate(today);
+                const daysUntil = dueDate ? Math.round((dueDate - todayDate) / 86400000) : null;
+                const warnDays = routine.remind_days || [7, 3, 0];
+                const warningThreshold = Math.max(...warnDays, 0);
+                let statusClass = 'routine-status-ok';
+                let statusIcon = 'ph-check-circle';
+                let statusText = '正常';
 
-                // URL 辨識
-                const nameHtml = r.url 
-                    ? `<a href="${r.url}" target="_blank" rel="noopener" style="color:var(--primary); text-decoration:underline;">${r.name}</a>`
-                    : this._linkifyText(r.name);
+                if (daysUntil !== null && daysUntil < 0) {
+                    statusClass = 'routine-status-overdue';
+                    statusIcon = 'ph-warning-circle';
+                    statusText = `逾期 ${Math.abs(daysUntil)} 天`;
+                } else if (daysUntil === 0) {
+                    statusClass = 'routine-status-warn';
+                    statusIcon = 'ph-clock';
+                    statusText = '今天到期';
+                } else if (daysUntil !== null && daysUntil <= warningThreshold) {
+                    statusClass = 'routine-status-warn';
+                    statusIcon = 'ph-clock';
+                    statusText = `${daysUntil} 天後`;
+                }
+
+                const safeName = escapeHtml(routine.name);
+                const safeUrl = /^https?:\/\//i.test(routine.url || '') ? escapeHtml(routine.url) : '';
+                const nameHtml = safeUrl
+                    ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeName}</a>`
+                    : this._linkifyText(safeName);
 
                 html += `<tr>
-                    <td style="text-align:center;">
-                        <input type="checkbox" style="width:18px; height:18px; cursor:pointer; accent-color:var(--success);"
-                            onchange="app.completeRoutine('${r._id}')" title="標記為已完成">
+                    <td class="routine-complete-column">
+                        <input type="checkbox" aria-label="將 ${safeName} 標記為今天完成" onchange="app.completeRoutine('${routine._id}')">
                     </td>
-                    <td>
-                        ${nameHtml}
-                        ${r.notes ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px; white-space:pre-line; line-height:1.5; padding:6px 8px; background:#f8fafc; border-radius:6px; border-left:2px solid var(--border-color);">${this._linkifyText(r.notes)}</div>` : ''}
-                    </td>
-                    <td class="hide-mobile">每 ${r.interval_days || '-'} 天</td>
-                    <td>${r.last_done || '-'}</td>
-                    <td>${r.next_due || '-'}</td>
-                    <td class="hide-mobile"><span class="${statusCls}">${statusText}</span></td>
+                    <td>${nameHtml}${routine.notes ? `<div class="routine-notes">${this._linkifyText(escapeHtml(routine.notes))}</div>` : ''}</td>
+                    <td>${this.getRoutineIntervalLabel(routine)}</td>
+                    <td class="date-cell">${routine.last_done || '-'}</td>
+                    <td class="date-cell">${routine.next_due || '-'}</td>
+                    <td><span class="${statusClass}"><i class="ph ${statusIcon}" aria-hidden="true"></i> ${statusText}</span></td>
                 </tr>`;
             });
 
-            html += `</tbody></table></div></div>`;
+            html += '</tbody></table></div></div>';
         });
 
-        if (routines.length === 0) {
-            html += `<div style="text-align:center; padding:40px; color:var(--text-muted);">
-                <i class="ph ph-folder-open" style="font-size:2rem; display:block; margin-bottom:10px;"></i>
-                尚無 Routine 項目，請切換到編輯模式新增</div>`;
-        }
-
+        if (!routines.length) html += '<div class="empty-state"><i class="ph ph-folder-open" aria-hidden="true"></i>尚無 Routine 項目</div>';
         container.innerHTML = html;
     },
 
-    // === 編輯頁 ===
     _renderRoutineEdit: function(container) {
-        const routines = this.data.routines;
-
-        const catOptions = ROUTINE_CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
-
-        let tableRows = routines.map(r => `
-            <tr>
-                <td>${r.name}</td>
-                <td class="hide-mobile">${r.category || '-'}</td>
-                <td class="hide-mobile">${r.interval_days || '-'}</td>
-                <td class="hide-mobile">${(r.remind_days || [7,3,0]).join(', ')}</td>
-                <td style="text-align:center;">
-                    <button class="btn btn-sm btn-secondary" onclick="app.openRoutineEditModal('${r._id}')"><i class="ph ph-pencil-simple"></i></button>
-                    <button class="btn btn-sm btn-secondary" style="color:var(--danger);" onclick="app.deleteRoutineItem('${r._id}')"><i class="ph ph-trash"></i></button>
+        const rows = [...this.data.routines]
+            .sort((a, b) => (a.next_due || '9999-12-31').localeCompare(b.next_due || '9999-12-31'))
+            .map(routine => `<tr>
+                <td>${escapeHtml(routine.name)}</td>
+                <td>${this.getRoutineIntervalLabel(routine)}</td>
+                <td class="date-cell">${routine.last_done || '-'}</td>
+                <td class="date-cell">${routine.next_due || '-'}</td>
+                <td class="table-actions">
+                    <button class="btn btn-sm btn-secondary" aria-label="編輯 ${escapeHtml(routine.name)}" onclick="app.openRoutineEditModal('${routine._id}')"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button>
+                    <button class="btn btn-sm btn-secondary btn-icon-danger" aria-label="刪除 ${escapeHtml(routine.name)}" onclick="app.deleteRoutineItem('${routine._id}')"><i class="ph ph-trash" aria-hidden="true"></i></button>
                 </td>
             </tr>`).join('');
 
-        if (routines.length === 0) {
-            tableRows = `<tr><td colspan="5" style="text-align:center; padding:30px; color:var(--text-muted);">尚無項目</td></tr>`;
-        }
-
         container.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h2 style="margin:0; font-size:1.3rem;">Routine 編輯</h2>
-            <div style="display:flex; gap:8px;">
-                <button class="btn btn-secondary btn-sm" onclick="app.routineView='overview'; app.renderRoutine();">
-                    <i class="ph ph-arrow-left"></i> 返回總覽
-                </button>
-                <button class="btn btn-primary btn-sm" onclick="app.openRoutineEditModal()">
-                    <i class="ph ph-plus"></i> 新增項目
-                </button>
+            <div class="section-toolbar">
+                <h2>Routine 編輯</h2>
+                <div class="toolbar-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="app.routineView='overview'; app.renderRoutine();"><i class="ph ph-arrow-left" aria-hidden="true"></i> 返回總覽</button>
+                    <button class="btn btn-primary btn-sm" onclick="app.openRoutineEditModal()"><i class="ph ph-plus" aria-hidden="true"></i> 新增項目</button>
+                </div>
             </div>
-        </div>
-        <div class="table-container">
-            <table class="routine-table">
-                <thead><tr>
-                    <th>項目名稱</th>
-                    <th class="hide-mobile">分類</th>
-                    <th class="hide-mobile">週期(天)</th>
-                    <th class="hide-mobile">提醒(天前)</th>
-                    <th style="width:120px; text-align:center;">操作</th>
-                </tr></thead>
-                <tbody>${tableRows}</tbody>
-            </table>
-        </div>`;
+            <div class="table-container"><table class="routine-table">
+                <thead><tr><th>項目</th><th>週期</th><th>上次更新</th><th>下次更新</th><th>操作</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" class="empty">尚無項目</td></tr>'}</tbody>
+            </table></div>`;
     },
 
-    // === URL 自動辨識 ===
     _linkifyText: function(text) {
         if (!text) return '';
-        const urlRegex = /(https?:\/\/[^\s<]+)/g;
-        return text.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener" style="color:var(--primary);">$1</a>');
+        return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
     },
 
-    // === 打勾完成 Routine ===
     completeRoutine: async function(id) {
-        const routine = this.data.routines.find(r => r._id === id);
+        const routine = this.data.routines.find(item => item._id === id);
         if (!routine) return;
-
-        const today = new Date().toISOString().split('T')[0];
-        const nextDue = new Date();
-        nextDue.setDate(nextDue.getDate() + (routine.interval_days || 30));
+        const today = toLocalDateString(new Date());
 
         try {
             await setDoc(doc(db, 'routines', id), {
-                ...routine,
-                _id: undefined, // 不存 _id
                 last_done: today,
-                next_due: nextDue.toISOString().split('T')[0]
+                next_due: addInterval(today, routine),
+                updated_at: new Date().toISOString()
             }, { merge: true });
-            this.showNotification('✅ 已更新完成日期', 'success');
-        } catch (e) {
-            this.showNotification('❌ 更新失敗: ' + e.message, 'error');
+            this.showNotification('已更新完成日期', 'success');
+        } catch (error) {
+            this.showNotification('更新失敗：' + error.message, 'error');
         }
     },
 
-    // === 新增/編輯 Modal ===
     openRoutineEditModal: function(id) {
-        const routine = id ? this.data.routines.find(r => r._id === id) : null;
-        const catOptions = ROUTINE_CATEGORIES.map(c => 
-            `<option value="${c}" ${routine && routine.category === c ? 'selected' : ''}>${c}</option>`
+        const routine = id ? this.data.routines.find(item => item._id === id) : null;
+        const interval = getInterval(routine || {});
+        const categoryOptions = ROUTINE_CATEGORIES.map(category =>
+            `<option value="${escapeHtml(category)}" ${routine?.category === category ? 'selected' : ''}>${escapeHtml(category)}</option>`
         ).join('');
 
+        document.getElementById('routine-edit-modal')?.remove();
+        this.modalReturnFocus?.delete('routine-edit-modal');
         const modal = document.createElement('div');
         modal.className = 'modal';
         modal.id = 'routine-edit-modal';
         modal.innerHTML = `
-        <div class="modal-content" style="max-width:500px;">
-            <div class="modal-header">
-                <h3>${routine ? '編輯' : '新增'} Routine 項目</h3>
-                <span class="close" onclick="app.closeModal('routine-edit-modal'); document.getElementById('routine-edit-modal')?.remove();">&times;</span>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" id="routine-edit-id" value="${id || ''}">
-                <div class="form-group">
-                    <label>項目名稱</label>
-                    <input type="text" id="routine-name" value="${routine ? routine.name : ''}" placeholder="例如：ALD 月維護">
+            <div class="modal-content routine-edit-dialog">
+                <div class="modal-header">
+                    <h3>${routine ? '編輯' : '新增'} Routine 項目</h3>
+                    <span class="close" onclick="app.closeModal('routine-edit-modal')">&times;</span>
                 </div>
-                <div class="form-group">
-                    <label>分類</label>
-                    <select id="routine-category">${catOptions}</select>
+                <div class="modal-body">
+                    <input type="hidden" id="routine-edit-id" value="${id || ''}">
+                    <div class="form-group"><label for="routine-name">項目</label><input type="text" id="routine-name" value="${escapeHtml(routine?.name || '')}" required></div>
+                    <div class="form-group"><label for="routine-category">分類</label><select id="routine-category">${categoryOptions}</select></div>
+                    <div class="form-row-two">
+                        <div class="form-group"><label for="routine-interval-value">週期</label><input type="number" id="routine-interval-value" value="${interval.value}" min="1" required></div>
+                        <div class="form-group"><label for="routine-interval-unit">單位</label><select id="routine-interval-unit">
+                            <option value="day" ${interval.unit === 'day' ? 'selected' : ''}>天</option>
+                            <option value="month" ${interval.unit === 'month' ? 'selected' : ''}>月</option>
+                            <option value="year" ${interval.unit === 'year' ? 'selected' : ''}>年</option>
+                        </select></div>
+                    </div>
+                    <div class="form-row-two">
+                        <div class="form-group"><label for="routine-last-done">上次更新日期</label><input type="date" id="routine-last-done" value="${routine?.last_done || ''}"></div>
+                        <div class="form-group"><label for="routine-next-due">下次更新日期</label><input type="date" id="routine-next-due" value="${routine?.next_due || ''}"></div>
+                    </div>
+                    <div class="form-group"><label for="routine-remind">提前提醒天數</label><input type="text" id="routine-remind" value="${escapeHtml((routine?.remind_days || [7, 3, 0]).join(','))}" aria-describedby="routine-remind-help"><div id="routine-remind-help" class="form-help">用逗號分隔，例如 7,3,0。</div></div>
+                    <div class="form-group"><label for="routine-url">相關連結（選填）</label><input type="url" id="routine-url" value="${escapeHtml(routine?.url || '')}"></div>
+                    <div class="form-group"><label for="routine-notes">備註（選填）</label><textarea id="routine-notes" rows="4">${escapeHtml(routine?.notes || '')}</textarea></div>
                 </div>
-                <div class="form-group">
-                    <label>週期 (天)</label>
-                    <input type="number" id="routine-interval" value="${routine ? routine.interval_days : 30}" min="1">
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="app.closeModal('routine-edit-modal')">取消</button>
+                    <button class="btn btn-primary" id="btn-save-routine" onclick="app.saveRoutineItem()">儲存</button>
                 </div>
-                <div class="form-group">
-                    <label>提醒 (幾天前，逗號分隔)</label>
-                    <input type="text" id="routine-remind" value="${routine ? (routine.remind_days || [7,3,0]).join(',') : '7,3,0'}" placeholder="7,3,0">
-                </div>
-                <div class="form-group">
-                    <label>相關連結 (選填)</label>
-                    <input type="url" id="routine-url" value="${routine ? (routine.url || '') : ''}" placeholder="https://...">
-                </div>
-                <div class="form-group">
-                    <label>備註 / 步驟說明 (選填)</label>
-                    <textarea id="routine-notes" rows="4" placeholder="例如：\n1. 關閉 valve\n2. 擦拭腕部..." style="resize:vertical; width:100%; font-family:inherit;">${routine ? (routine.notes || '') : ''}</textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="app.closeModal('routine-edit-modal'); document.getElementById('routine-edit-modal')?.remove();">取消</button>
-                <button class="btn btn-primary" onclick="app.saveRoutineItem()">儲存</button>
-            </div>
-        </div>`;
+            </div>`;
         document.body.appendChild(modal);
     },
 
     saveRoutineItem: async function() {
         const editId = document.getElementById('routine-edit-id').value;
         const id = editId || generateId('RTN');
+        const existing = editId ? this.data.routines.find(item => item._id === editId) : null;
         const name = document.getElementById('routine-name').value.trim();
-        if (!name) { this.showNotification('請輸入項目名稱', 'warning'); return; }
+        const intervalValue = Math.max(1, parseInt(document.getElementById('routine-interval-value').value, 10) || 1);
+        const intervalUnit = document.getElementById('routine-interval-unit').value;
+        const lastDone = document.getElementById('routine-last-done').value || null;
+        let nextDue = document.getElementById('routine-next-due').value || null;
+        const remindDays = document.getElementById('routine-remind').value
+            .split(',').map(value => parseInt(value.trim(), 10)).filter(Number.isFinite);
 
-        const existing = editId ? this.data.routines.find(r => r._id === editId) : null;
-        const remindStr = document.getElementById('routine-remind').value;
-        const remindDays = remindStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        if (!name) {
+            this.showNotification('請輸入項目名稱', 'warning');
+            document.getElementById('routine-name').focus();
+            return;
+        }
+        if (!nextDue && lastDone) nextDue = addInterval(lastDone, { interval_value: intervalValue, interval_unit: intervalUnit });
 
         const payload = {
             name,
             category: document.getElementById('routine-category').value,
-            interval_days: parseInt(document.getElementById('routine-interval').value) || 30,
-            remind_days: remindDays.length > 0 ? remindDays : [7, 3, 0],
+            interval_value: intervalValue,
+            interval_unit: intervalUnit,
+            interval_days: intervalToDays(intervalValue, intervalUnit),
+            last_done: lastDone,
+            next_due: nextDue,
+            remind_days: remindDays.length ? remindDays : [7, 3, 0],
             url: document.getElementById('routine-url').value.trim() || null,
             notes: document.getElementById('routine-notes').value.trim() || null,
-            last_done: existing ? existing.last_done : null,
-            next_due: existing ? existing.next_due : null,
-            created_at: existing ? existing.created_at : new Date().toISOString()
+            created_at: existing?.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString()
         };
 
+        const button = document.getElementById('btn-save-routine');
+        button.disabled = true;
+        button.textContent = '儲存中...';
         try {
-            await setDoc(doc(db, 'routines', id), payload);
+            await setDoc(doc(db, 'routines', id), payload, { merge: true });
             this.closeModal('routine-edit-modal');
-            document.getElementById('routine-edit-modal')?.remove();
-            this.showNotification('✅ 已儲存', 'success');
-        } catch (e) {
-            this.showNotification('❌ 儲存失敗: ' + e.message, 'error');
+            this.showNotification('已儲存', 'success');
+        } catch (error) {
+            this.showNotification('儲存失敗：' + error.message, 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = '儲存';
         }
     },
 
@@ -280,8 +338,8 @@ export const routineModule = {
         try {
             await deleteDoc(doc(db, 'routines', id));
             this.showNotification('已刪除', 'success');
-        } catch (e) {
-            this.showNotification('❌ 刪除失敗: ' + e.message, 'error');
+        } catch (error) {
+            this.showNotification('刪除失敗：' + error.message, 'error');
         }
     }
 };

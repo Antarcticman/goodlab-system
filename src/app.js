@@ -45,6 +45,9 @@ const app = {
     currentRole: 'Guest',
     currentMember: null, // Phase 5: 當前登入的 member 完整資料
     membersLoaded: false,
+    realtimeUnsubscribers: new Map(),
+    realtimeProfile: 'Anonymous',
+    modalReturnFocus: new Map(),
 
     // --- 訪客遮罩 ---
     guestGuardHtml: `<tr><td colspan="10" style="text-align:center; padding: 50px 20px; background: #f8fafc;">
@@ -160,16 +163,90 @@ const app = {
     // --- 手機版「更多」選單 ---
     toggleMobileMore: function() {
         const drawer = document.getElementById('mobile-more-drawer');
-        if (drawer) drawer.classList.toggle('hidden');
+        const trigger = document.getElementById('mobile-more-btn');
+        if (!drawer) return;
+        const willOpen = drawer.classList.contains('hidden');
+        drawer.classList.toggle('hidden');
+        if (trigger) trigger.setAttribute('aria-expanded', String(willOpen));
+    },
+
+    getAllowedTabs: function() {
+        if (!this.currentUser) return ['welcome'];
+        if (this.currentRole === 'Admin') {
+            return ['overview', 'logs', 'routine', 'duty', 'inventory', 'accounting', 'members', 'employment', 'instruments'];
+        }
+        if (this.currentRole === 'User') {
+            return ['overview', 'logs', 'duty', 'inventory', 'members', 'instruments'];
+        }
+        return ['welcome'];
+    },
+
+    renderOverview: function() {
+        const container = document.getElementById('overview-content');
+        const greeting = document.getElementById('overview-greeting');
+        if (!container || !this.currentMember) return;
+
+        const openLogs = this.data.logs.filter(item => item.Status === 'Open').length;
+        const duty = typeof this._getCurrentDutyPerson === 'function' ? this._getCurrentDutyPerson() : null;
+        const dutyName = duty && duty.member ? duty.member.Name_Ch : '尚未排定';
+        const escapeText = value => String(value ?? '').replace(/[&<>'"]/g, character => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        })[character]);
+        const safeDutyName = escapeText(dutyName);
+        const isAdmin = this.currentRole === 'Admin';
+        const accounting = isAdmin && typeof this.getAccountingSummary === 'function'
+            ? this.getAccountingSummary()
+            : null;
+        const routines = isAdmin && typeof this.getUpcomingRoutines === 'function'
+            ? this.getUpcomingRoutines(6)
+            : [];
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+        const routineRows = routines.map(routine => {
+            let stateClass = 'routine-status-ok';
+            let stateText = routine.next_due;
+            if (routine.next_due < today) {
+                stateClass = 'routine-status-overdue';
+                stateText = `${routine.next_due} · 已逾期`;
+            } else if (routine.next_due === today) {
+                stateClass = 'routine-status-warn';
+                stateText = `${routine.next_due} · 今天`;
+            }
+            return `<button type="button" class="overview-routine-row" onclick="app.switchTab('routine')">
+                <span>${escapeText(routine.name)}</span>
+                <span class="${stateClass}">${stateText}</span>
+            </button>`;
+        }).join('');
+
+        greeting.textContent = `${this.currentMember.Name_Ch}，以下是目前資料摘要。`;
+        container.innerHTML = `
+            <div class="overview-kpis">
+                ${isAdmin ? `<button class="overview-card overview-card-action" onclick="app.switchTab('accounting')">
+                    <span class="overview-card-icon"><i class="ph ph-wallet" aria-hidden="true"></i></span>
+                    <span class="overview-card-body"><span class="overview-card-label">帳務可用餘額</span><strong>$${(accounting?.totalBalance || 0).toLocaleString('zh-TW')}</strong><span>戶頭與現金合計</span></span>
+                </button>` : ''}
+                <button class="overview-card overview-card-action" onclick="app.switchTab('logs')">
+                    <span class="overview-card-icon overview-card-icon-danger"><i class="ph ph-wrench" aria-hidden="true"></i></span>
+                    <span class="overview-card-body"><span class="overview-card-label">待處理維修</span><strong>${openLogs}</strong><span>查看維修紀錄</span></span>
+                </button>
+                <button class="overview-card overview-card-action" onclick="app.switchTab('duty')">
+                    <span class="overview-card-icon overview-card-icon-success"><i class="ph ph-broom" aria-hidden="true"></i></span>
+                    <span class="overview-card-body"><span class="overview-card-label">本週值日生</span><strong class="overview-card-name">${safeDutyName}</strong><span>查看本週工作</span></span>
+                </button>
+            </div>
+            ${isAdmin ? `<section class="overview-panel" aria-labelledby="overview-routine-heading">
+                <div class="overview-panel-header">
+                    <div><h3 id="overview-routine-heading">近期 Routine</h3><p>依下次更新日期排序</p></div>
+                    <button class="btn btn-secondary btn-sm" onclick="app.switchTab('routine')">查看全部</button>
+                </div>
+                <div class="overview-routine-list">${routineRows || '<div class="empty">尚無設定下次更新日期的 Routine</div>'}</div>
+            </section>` : ''}`;
     },
 
     // --- 頁面切換 ---
-    switchTab: function(tabId) {
-        // 權限守衛
-        if (this.currentRole === 'Guest' && tabId !== 'members') return;
-        
-        const userForbidden = ['logs', 'accounting', 'routine', 'employment'];
-        if (this.currentRole === 'User' && userForbidden.includes(tabId)) return;
+    switchTab: function(tabId, fromRoute = false) {
+        if (!this.getAllowedTabs().includes(tabId)) return;
 
         document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
         const targetPage = document.getElementById('page-' + tabId);
@@ -179,6 +256,8 @@ const app = {
         document.querySelectorAll('.nav-item').forEach(btn => {
             const isMatch = btn.getAttribute('onclick') && btn.getAttribute('onclick').includes("'" + tabId + "'");
             btn.classList.toggle('active', isMatch);
+            if (isMatch) btn.setAttribute('aria-current', 'page');
+            else btn.removeAttribute('aria-current');
         });
 
         // 手機版底部欄 highlight
@@ -189,6 +268,8 @@ const app = {
         });
 
         const titleMap = {
+            'welcome': '歡迎',
+            'overview': '實驗室總覽',
             'members': '人員管理',
             'instruments': '儀器設備',
             'logs': '維修紀錄',
@@ -203,6 +284,7 @@ const app = {
 
         // 切頁時觸發對應渲染
         const renderMap = {
+            'overview': () => this.renderOverview(),
             'inventory': () => this.renderInventory(),
             'instruments': () => this.renderInstruments(),
             'logs': () => this.renderLogs(),
@@ -213,78 +295,143 @@ const app = {
             'employment': () => this.renderEmployment()
         };
         if (renderMap[tabId]) renderMap[tabId]();
+
+        if (!fromRoute && window.location.hash !== `#/${tabId}`) {
+            history.pushState({ tabId }, '', `#/${tabId}`);
+        }
+
+        const main = document.getElementById('main-content');
+        if (main) main.focus({ preventScroll: true });
+    },
+
+    routeFromHash: function() {
+        const requested = window.location.hash.replace(/^#\/?/, '') || (this.currentUser ? 'overview' : 'welcome');
+        const fallback = this.currentUser ? 'overview' : 'welcome';
+        const target = this.getAllowedTabs().includes(requested) ? requested : fallback;
+        this.switchTab(target, target === requested);
     },
 
     // --- Firebase 即時連線 ---
-    setupRealtimeListeners: function() {
-        ['member-tbody', 'inst-tbody', 'log-tbody', 'acc-tbody'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-                const cols = id === 'inst-tbody' ? 6 : id === 'log-tbody' ? 8 : id === 'acc-tbody' ? 8 : (id === 'member-tbody' ? 6 : 1);
-                el.innerHTML = `<tr><td colspan="${cols}" class="loading" style="text-align:center; padding:20px;">與 Firebase 連線中...</td></tr>`;
+    getRealtimeConfig: function() {
+        return {
+            members: { dataKey: 'members', withId: false, onData: () => { this.membersLoaded = true; this.renderMembers(); this.checkUserRole(); } },
+            instruments: { dataKey: 'instruments', withId: false, onData: () => { this.renderInstruments(); this.renderOverview(); } },
+            logs: { dataKey: 'logs', withId: false, onData: () => { this.renderLogs(); this.renderOverview(); } },
+            inventory: { dataKey: 'inventory', withId: false, onData: () => { this.renderInventory(); this.renderOverview(); } },
+            duty_records: { dataKey: 'duty_records', withId: true, onData: () => { this.renderDuty(); this.renderOverview(); } },
+            accounting: { dataKey: 'accounting', withId: false, onData: () => { this.renderAccounting(); this.calcDashboard(); this.renderOverview(); } },
+            routines: { dataKey: 'routines', withId: true, onData: () => { this.renderRoutine(); this.renderOverview(); } },
+            projects: { dataKey: 'projects', withId: true, onData: () => this.renderEmployment() },
+            employments: { dataKey: 'employments', withId: true, onData: () => this.renderEmployment() }
+        };
+    },
+
+    syncRealtimeListeners: function(profile) {
+        const allowedByProfile = {
+            Anonymous: [],
+            Guest: ['members'],
+            User: ['members', 'instruments', 'logs', 'inventory', 'duty_records'],
+            Admin: ['members', 'instruments', 'logs', 'inventory', 'duty_records', 'accounting', 'routines', 'projects', 'employments']
+        };
+        const allowed = new Set(allowedByProfile[profile] || []);
+        const config = this.getRealtimeConfig();
+
+        for (const [name, unsubscribe] of this.realtimeUnsubscribers.entries()) {
+            if (!allowed.has(name)) {
+                unsubscribe();
+                this.realtimeUnsubscribers.delete(name);
+                this.data[config[name].dataKey] = [];
             }
+        }
+
+        allowed.forEach(name => {
+            if (this.realtimeUnsubscribers.has(name)) return;
+            const item = config[name];
+            const unsubscribe = onSnapshot(collection(db, name), snapshot => {
+                this.data[item.dataKey] = snapshot.docs.map(document => item.withId ? ({ _id: document.id, ...document.data() }) : document.data());
+                item.onData();
+            }, error => {
+                this.data[item.dataKey] = [];
+                if (name === 'members') this.membersLoaded = true;
+                console.warn(`[GOODLAB] ${name} listener unavailable: ${error.code || error.message}`);
+                if (this.currentUser) this.showNotification(`無法載入${name}資料，請重新整理或聯絡管理員。`, 'error');
+                item.onData();
+            });
+            this.realtimeUnsubscribers.set(name, unsubscribe);
         });
 
-        // 原有集合
-        onSnapshot(collection(db, "accounting"), (snapshot) => {
-            this.data.accounting = snapshot.docs.map(d => d.data());
-            this.renderAccounting();
-            this.calcDashboard();
-        });
+        this.realtimeProfile = profile;
+    },
 
-        onSnapshot(collection(db, "members"), (snapshot) => {
-            this.data.members = snapshot.docs.map(d => d.data());
-            this.membersLoaded = true;
-            this.renderMembers();
-            this.checkUserRole();
-        });
-
-        onSnapshot(collection(db, "instruments"), (snapshot) => {
-            this.data.instruments = snapshot.docs.map(d => d.data());
-            this.renderInstruments();
-        });
-
-        onSnapshot(collection(db, "logs"), (snapshot) => {
-            this.data.logs = snapshot.docs.map(d => d.data());
-            this.renderLogs();
-        });
-
-        onSnapshot(collection(db, "inventory"), (snapshot) => {
-            this.data.inventory = snapshot.docs.map(d => d.data());
-            this.renderInventory();
-        });
-
-        // Phase 5: 新增集合
-        onSnapshot(collection(db, "duty_records"), (snapshot) => {
-            this.data.duty_records = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
-            this.renderDuty();
-        });
-
-        onSnapshot(collection(db, "routines"), (snapshot) => {
-            this.data.routines = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
-            this.renderRoutine();
-        });
-
-        onSnapshot(collection(db, "projects"), (snapshot) => {
-            this.data.projects = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
-            this.renderEmployment();
-        });
-
-        onSnapshot(collection(db, "employments"), (snapshot) => {
-            this.data.employments = snapshot.docs.map(d => ({ _id: d.id, ...d.data() }));
-            this.renderEmployment();
-        });
+    setupRealtimeListeners: function() {
+        this.syncRealtimeListeners(this.currentUser ? 'Guest' : 'Anonymous');
     },
 
     // --- Modal 事件 ---
     setupModalEvents: function() {
-        // Phase 2: 移除了背景點擊關閉功能
+        const prepareModal = modal => {
+            if (!modal || modal.dataset.a11yReady === 'true') return;
+            modal.dataset.a11yReady = 'true';
+            modal.setAttribute('role', 'dialog');
+            modal.setAttribute('aria-modal', 'true');
+
+            const heading = modal.querySelector('.modal-header h3');
+            if (heading) {
+                if (!heading.id) heading.id = `${modal.id}-title`;
+                modal.setAttribute('aria-labelledby', heading.id);
+            }
+
+            modal.querySelectorAll('.close').forEach(close => {
+                close.setAttribute('role', 'button');
+                close.setAttribute('tabindex', '0');
+                close.setAttribute('aria-label', '關閉對話框');
+                close.addEventListener('keydown', event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        close.click();
+                    }
+                });
+            });
+
+            modal.querySelectorAll('.form-group').forEach(group => {
+                const label = group.querySelector('label');
+                const control = group.querySelector('input:not([type="hidden"]), select, textarea');
+                if (label && control && control.id && !label.htmlFor) label.htmlFor = control.id;
+            });
+
+            const syncModalFocus = () => {
+                const isOpen = !modal.classList.contains('hidden');
+                if (isOpen && !this.modalReturnFocus.has(modal.id)) {
+                    this.modalReturnFocus.set(modal.id, document.activeElement);
+                    requestAnimationFrame(() => {
+                        const target = modal.querySelector('input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [tabindex="0"]');
+                        if (target) target.focus();
+                    });
+                } else if (!isOpen && this.modalReturnFocus.has(modal.id)) {
+                    const trigger = this.modalReturnFocus.get(modal.id);
+                    this.modalReturnFocus.delete(modal.id);
+                    if (trigger && document.contains(trigger)) trigger.focus();
+                }
+            };
+            const observer = new MutationObserver(syncModalFocus);
+            observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+            syncModalFocus();
+        };
+
+        document.querySelectorAll('.modal').forEach(prepareModal);
+        const dynamicModalObserver = new MutationObserver(records => {
+            records.forEach(record => record.addedNodes.forEach(node => {
+                if (!(node instanceof HTMLElement)) return;
+                if (node.classList.contains('modal')) prepareModal(node);
+                node.querySelectorAll?.('.modal').forEach(prepareModal);
+            }));
+        });
+        dynamicModalObserver.observe(document.body, { childList: true, subtree: true });
     },
 
     // --- 初始化 ---
     init: function() {
         this.populateLocationSelects();
-        this.setupRealtimeListeners();
         this.setupModalEvents();
         this.setupAutoStatus();
         this.setupLogAutoStatus();
@@ -313,7 +460,26 @@ document.addEventListener('keydown', (e) => {
         const drawer = document.getElementById('mobile-more-drawer');
         if (drawer && !drawer.classList.contains('hidden')) drawer.classList.add('hidden');
     }
+
+    if (e.key === 'Tab') {
+        const modal = document.querySelector('.modal:not(.hidden)');
+        if (!modal) return;
+        const focusable = [...modal.querySelectorAll('button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex="0"]')]
+            .filter(element => element.offsetParent !== null);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+        }
+    }
 });
+
+window.addEventListener('popstate', () => app.routeFromHash());
 
 window.app = app;
 

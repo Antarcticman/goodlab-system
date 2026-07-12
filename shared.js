@@ -15,11 +15,14 @@ export const UI = {
             container = document.createElement('div');
             container.id = 'toast-container';
             container.className = 'toast-container';
+            container.setAttribute('aria-live', 'polite');
+            container.setAttribute('aria-atomic', 'false');
             document.body.appendChild(container);
         }
 
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
+        toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
         
         // 搭配 Phosphor Icons 顯示對應圖示
         const iconMap = {
@@ -29,10 +32,8 @@ export const UI = {
             'info': '<i class="ph ph-info"></i>'
         };
         
-        toast.innerHTML = `<div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:1.2rem;">${iconMap[type] || iconMap.info}</span>
-            <span>${msg}</span>
-        </div>`;
+        toast.innerHTML = `<span class="toast-icon" aria-hidden="true">${iconMap[type] || iconMap.info}</span><span class="toast-message"></span>`;
+        toast.querySelector('.toast-message').textContent = msg;
         
         container.appendChild(toast);
 
