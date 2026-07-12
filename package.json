@@ -10,15 +10,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Antarcticman/goodlab-system.git"
+    "url": "git+https://github.com/ntu-goodlab/goodlab-system.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/Antarcticman/goodlab-system/issues"
+    "url": "https://github.com/ntu-goodlab/goodlab-system/issues"
   },
-  "homepage": "https://github.com/Antarcticman/goodlab-system#readme",
+  "homepage": "https://ntu-goodlab.github.io/goodlab-system/",
   "devDependencies": {
     "vite": "^8.0.16"
   },
