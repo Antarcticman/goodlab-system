@@ -129,7 +129,15 @@ export const routineModule = {
             items.sort((a, b) => (a.next_due || '9999-12-31').localeCompare(b.next_due || '9999-12-31'));
             html += `<div class="duty-card routine-group">
                 <div class="duty-card-header"><h3>${escapeHtml(category)}</h3></div>
-                <div class="table-container"><table class="routine-table">
+                <div class="table-container"><table class="routine-table routine-overview-table">
+                    <colgroup>
+                        <col class="routine-col-complete">
+                        <col class="routine-col-item">
+                        <col class="routine-col-cycle">
+                        <col class="routine-col-date">
+                        <col class="routine-col-date">
+                        <col class="routine-col-status">
+                    </colgroup>
                     <thead><tr>
                         <th class="routine-complete-column">完成</th>
                         <th>項目</th>
@@ -166,18 +174,18 @@ export const routineModule = {
                 const safeName = escapeHtml(routine.name);
                 const safeUrl = /^https?:\/\//i.test(routine.url || '') ? escapeHtml(routine.url) : '';
                 const nameHtml = safeUrl
-                    ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeName}</a>`
+                    ? `<a class="routine-name-link" href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeName}<i class="ph ph-arrow-square-out" aria-hidden="true"></i></a>`
                     : this._linkifyText(safeName);
 
                 html += `<tr>
                     <td class="routine-complete-column">
                         <input type="checkbox" aria-label="將 ${safeName} 標記為今天完成" onchange="app.completeRoutine('${routine._id}')">
                     </td>
-                    <td>${nameHtml}${routine.notes ? `<div class="routine-notes">${this._linkifyText(escapeHtml(routine.notes))}</div>` : ''}</td>
-                    <td>${this.getRoutineIntervalLabel(routine)}</td>
+                    <td class="routine-item-cell">${nameHtml}${routine.notes ? `<div class="routine-notes">${this._linkifyText(escapeHtml(routine.notes))}</div>` : ''}</td>
+                    <td class="routine-cycle-cell">${this.getRoutineIntervalLabel(routine)}</td>
                     <td class="date-cell">${routine.last_done || '-'}</td>
                     <td class="date-cell">${routine.next_due || '-'}</td>
-                    <td><span class="${statusClass}"><i class="ph ${statusIcon}" aria-hidden="true"></i> ${statusText}</span></td>
+                    <td class="routine-status-cell"><span class="${statusClass}"><i class="ph ${statusIcon}" aria-hidden="true"></i> ${statusText}</span></td>
                 </tr>`;
             });
 
@@ -193,6 +201,7 @@ export const routineModule = {
             .sort((a, b) => (a.next_due || '9999-12-31').localeCompare(b.next_due || '9999-12-31'))
             .map(routine => `<tr>
                 <td>${escapeHtml(routine.name)}</td>
+                <td>${routine.visible_to_users ? '<span class="status-badge status-badge-success"><i class="ph ph-eye" aria-hidden="true"></i> 顯示</span>' : '<span class="status-badge"><i class="ph ph-eye-slash" aria-hidden="true"></i> 不顯示</span>'}</td>
                 <td>${this.getRoutineIntervalLabel(routine)}</td>
                 <td class="date-cell">${routine.last_done || '-'}</td>
                 <td class="date-cell">${routine.next_due || '-'}</td>
@@ -210,15 +219,31 @@ export const routineModule = {
                     <button class="btn btn-primary btn-sm" onclick="app.openRoutineEditModal()"><i class="ph ph-plus" aria-hidden="true"></i> 新增項目</button>
                 </div>
             </div>
-            <div class="table-container"><table class="routine-table">
-                <thead><tr><th>項目</th><th>週期</th><th>上次更新</th><th>下次更新</th><th>操作</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="5" class="empty">尚無項目</td></tr>'}</tbody>
+            <div class="table-container"><table class="routine-table routine-edit-table">
+                <colgroup>
+                    <col class="routine-col-item">
+                    <col class="routine-col-visibility">
+                    <col class="routine-col-cycle">
+                    <col class="routine-col-date">
+                    <col class="routine-col-date">
+                    <col class="routine-col-actions">
+                </colgroup>
+                <thead><tr><th>項目</th><th>成員總覽</th><th>週期</th><th>上次更新</th><th>下次更新</th><th>操作</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="6" class="empty">尚無項目</td></tr>'}</tbody>
             </table></div>`;
     },
 
     _linkifyText: function(text) {
         if (!text) return '';
-        return text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+        return text.replace(/https?:\/\/[^\s<>"'，。；、）)]+/g, url => {
+            let label = '開啟連結';
+            try {
+                label = new URL(url.replaceAll('&amp;', '&')).hostname.replace(/^www\./, '');
+            } catch (_) {
+                // 無法解析網域時仍保留可辨識的通用連結文字。
+            }
+            return `<a class="routine-inline-link" href="${url}" target="_blank" rel="noopener noreferrer" title="${url}" aria-label="開啟 ${escapeHtml(label)}"><i class="ph ph-link" aria-hidden="true"></i>${escapeHtml(label)}</a>`;
+        });
     },
 
     completeRoutine: async function(id) {
@@ -275,6 +300,7 @@ export const routineModule = {
                     <div class="form-group"><label for="routine-remind">提前提醒天數</label><input type="text" id="routine-remind" value="${escapeHtml((routine?.remind_days || [7, 3, 0]).join(','))}" aria-describedby="routine-remind-help"><div id="routine-remind-help" class="form-help">用逗號分隔，例如 7,3,0。</div></div>
                     <div class="form-group"><label for="routine-url">相關連結（選填）</label><input type="url" id="routine-url" value="${escapeHtml(routine?.url || '')}"></div>
                     <div class="form-group"><label for="routine-notes">備註（選填）</label><textarea id="routine-notes" rows="4">${escapeHtml(routine?.notes || '')}</textarea></div>
+                    <label class="overview-check"><input type="checkbox" id="routine-visible" ${routine?.visible_to_users ? 'checked' : ''}>顯示於一般成員總覽</label>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" onclick="app.closeModal('routine-edit-modal')">取消</button>
@@ -314,6 +340,7 @@ export const routineModule = {
             remind_days: remindDays.length ? remindDays : [7, 3, 0],
             url: document.getElementById('routine-url').value.trim() || null,
             notes: document.getElementById('routine-notes').value.trim() || null,
+            visible_to_users: Boolean(document.getElementById('routine-visible').checked),
             created_at: existing?.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString()
         };

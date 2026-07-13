@@ -28,7 +28,9 @@ export const membersModule = {
         tbody.innerHTML = filtered.map(m => {
             const isAlumni = m.Status === 'Alumni';
             const degreeShort = m.Degree === "PhD" ? "博" : (m.Degree === "Master" ? "碩" : "大");
-            const statusDisplay = isAlumni ? `🎓 已畢` : this.calculateGrade(m.Enrollment_Date, m.Degree);
+            const statusDisplay = isAlumni
+                ? '<span class="member-status is-alumni"><i class="ph ph-graduation-cap" aria-hidden="true"></i>已畢</span>'
+                : this.calculateGrade(m.Enrollment_Date, m.Degree);
             const adminBadge = m.Role === 'Admin' ? `<span class="role-badge Admin">Admin</span>` : '';
 
             return `
@@ -89,17 +91,17 @@ export const membersModule = {
             this.setMemberStatus(m.Status || 'Active');
 
             if (m.Google_UID) {
-                document.getElementById('Bind_Status').value = "✅ 已綁定";
+                document.getElementById('Bind_Status').value = "已綁定";
                 document.getElementById('btn-unbind').classList.remove('hidden');
             } else {
-                document.getElementById('Bind_Status').value = "❌ 未綁定";
+                document.getElementById('Bind_Status').value = "未綁定";
                 document.getElementById('btn-unbind').classList.add('hidden');
             }
         } else {
             document.getElementById('m-modal-title').innerText = "新增成員";
             if (btnDel) btnDel.classList.add('hidden'); 
             document.getElementById('Student_ID').disabled = false;
-            document.getElementById('Bind_Status').value = "❌ 未綁定";
+            document.getElementById('Bind_Status').value = "未綁定";
             document.getElementById('btn-unbind').classList.add('hidden');
             this.setMemberStatus('Active');
             document.getElementById('Role').value = 'User';
@@ -116,11 +118,11 @@ export const membersModule = {
             await updateDoc(doc(db, "members", id), {
                 Google_UID: null // 清空 UID
             });
-            document.getElementById('Bind_Status').value = "❌ 未綁定";
+            document.getElementById('Bind_Status').value = "未綁定";
             document.getElementById('btn-unbind').classList.add('hidden');
-            this.showNotification("✅ 已成功解除綁定！");
+            this.showNotification("已成功解除綁定");
         } catch (e) {
-            this.showNotification("❌ 解除失敗: " + e.message, 'error');
+            this.showNotification("解除失敗：" + e.message, 'error');
         }
     },
 
@@ -146,7 +148,7 @@ export const membersModule = {
             await setDoc(doc(db, "members", payload.Student_ID), payload);
             this.closeModal('member-modal');
         } catch (e) {
-            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
+            this.showNotification("發生錯誤：" + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;

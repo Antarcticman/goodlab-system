@@ -80,7 +80,9 @@ export const instrumentsModule = {
                 { width: '80px', align: 'center', render: row => `<button onclick="event.stopPropagation(); app.openInstModal('${row.Instrument_ID}')" class="btn btn-sm btn-secondary" ${isAdmin?'':'disabled'}><i class="ph ph-pencil-simple"></i></button>` }
             ],
             emptyMessage: "查無符合的儀器資料",
-            onRowClick: (rowData, tr) => this.toggleInstLogs(rowData, tr)
+            // 一般成員不會載入完整維修紀錄；只有 Admin 才能展開歷史，
+            // 避免把「未載入」誤顯示成「沒有維修紀錄」。
+            onRowClick: isAdmin ? ((rowData, tr) => this.toggleInstLogs(rowData, tr)) : null
         });
     },
 

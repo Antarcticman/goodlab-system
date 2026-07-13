@@ -29,7 +29,7 @@ export function formatDateForInput(dateStr) {
 // 從 members 陣列中取得名字（支援 Student_ID 或 Google_UID）
 export function getMemberName(members, id) {
     if (!id) return '';
-    if (id === 'Fund') return '🏦 公積金';
+    if (id === 'Fund') return '公積金';
     const m = members.find(x => x.Student_ID === id || x.Google_UID === id);
     return m ? m.Name_Ch : id;
 }

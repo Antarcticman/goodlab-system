@@ -203,6 +203,37 @@ function normalizeProject(raw) {
     };
 }
 
+function projectCurrentState(raw, referenceDate = new Date()) {
+    const project = normalizeProject(raw);
+    const referenceMonth = `${referenceDate.getFullYear()}-${String(referenceDate.getMonth() + 1).padStart(2, '0')}`;
+    const currentIndex = monthKeyToIndex(referenceMonth);
+    const startIndex = monthKeyToIndex(project.start_month);
+    const endIndex = monthKeyToIndex(project.end_month);
+
+    if (project.status === 'archived') {
+        return { key: 'ended', label: '已封存', icon: 'ph-archive', rank: 2 };
+    }
+    if (startIndex === null || endIndex === null) {
+        return { key: 'undated', label: '未設定期限', icon: 'ph-minus-circle', rank: 1 };
+    }
+    if (currentIndex < startIndex) {
+        return { key: 'upcoming', label: '尚未開始', icon: 'ph-calendar-dots', rank: 0 };
+    }
+    if (currentIndex > endIndex) {
+        return { key: 'ended', label: '已結束', icon: 'ph-check-circle', rank: 2 };
+    }
+    return { key: 'active', label: '進行中', icon: 'ph-play-circle', rank: 0 };
+}
+
+function formatProjectPeriod(project) {
+    if (project.start_month && project.end_month) {
+        return `${formatRocMonth(project.start_month)}～${formatRocMonth(project.end_month)}`;
+    }
+    if (project.start_month) return `${formatRocMonth(project.start_month)} 起`;
+    if (project.end_month) return `至 ${formatRocMonth(project.end_month)}`;
+    return '未設定';
+}
+
 function declaredSchedule(employment) {
     const normalized = normalizeEmployment(employment);
     const schedule = {};
@@ -309,6 +340,7 @@ export const employmentUtils = {
     monthRange,
     normalizeEmployment,
     normalizeProject,
+    projectCurrentState,
     parseStudentIdForSort,
     semesterKey,
     semesterLabel,
@@ -455,7 +487,7 @@ export const employmentModule = {
         const content = this.employmentPersonEditorOpen ? '' : (listActive ? this._renderPeopleListView() : this._renderTimelineView());
         const toolbarActions = this.employmentPersonEditorOpen ? '' : `<div class="employment-toolbar-actions">${viewToggle}<button type="button" class="btn btn-primary" onclick="app.openEmploymentPersonEditor()"><i class="ph ph-user-plus" aria-hidden="true"></i> 新增／編輯人員</button></div>`;
         return `<div class="employment-toolbar employment-people-toolbar">
-                <div><h3>本學期聘僱人員</h3><p>F 學號優先，同類依入學年度由早到晚排列；列表用於編輯，甘特圖用於檢查每月金額。</p></div>
+                <div><h3>本學期聘僱人員</h3></div>
                 ${toolbarActions}
             </div>
             ${editor}
@@ -562,7 +594,7 @@ export const employmentModule = {
         </div>`;
 
         if (!grouped.size) {
-            return `<div class="employment-toolbar"><div><h3>人員時程</h3><p>${mode === 'declared' ? '月份格可直接編輯最終總額。' : '平均月薪由聘僱總額自動計算。'}</p></div>${modeToggle}</div>
+            return `<div class="employment-timeline-controls">${modeToggle}</div>
                 <div class="empty-state"><i class="ph ph-calendar-blank" aria-hidden="true"></i>這個學期沒有聘僱資料</div>`;
         }
 
@@ -599,8 +631,8 @@ export const employmentModule = {
             rows += `<tr class="employment-total-row"><th scope="row">${mode === 'declared' ? '本月聘僱合計' : '本月平均月薪'}</th>${visibleMonths.map(month => `<td>${totals[month] ? totals[month].toLocaleString('zh-TW') : '—'}</td>`).join('')}</tr>`;
         });
 
-        return `<div class="employment-toolbar employment-timeline-toolbar"><div><h3>甘特圖</h3><p>${mode === 'declared' ? `點擊月份格編輯；低於每計畫每月 ${formatMoney(MIN_PROJECT_MONTHLY_AMOUNT)} 會顯示警告。` : '預設唯讀；尾差自動放在對應期間最後一個月。'}</p></div>${modeToggle}</div>
-            <div class="employment-timeline-wrap"><table class="employment-timeline-table">
+        return `<div class="employment-timeline-controls">${modeToggle}</div>
+            <div class="employment-timeline-wrap" tabindex="0" role="region" aria-label="聘僱時程表，可左右及上下捲動"><table class="employment-timeline-table">
                 <thead><tr><th scope="col">人員／計畫</th>${headers}</tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
@@ -947,10 +979,19 @@ export const employmentModule = {
     },
 
     _renderProjectsView: function() {
-        const projects = this._projectData().sort((a, b) => {
-            if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
-            return (a.name || '').localeCompare(b.name || '', 'zh-Hant');
-        });
+        const projects = this._projectData()
+            .map(project => ({ ...project, _currentState: projectCurrentState(project) }))
+            .sort((a, b) => {
+                if (a._currentState.rank !== b._currentState.rank) return a._currentState.rank - b._currentState.rank;
+                if (a._currentState.rank === 0 && a._currentState.key !== b._currentState.key) {
+                    return a._currentState.key === 'active' ? -1 : 1;
+                }
+                if (a._currentState.rank === 2) {
+                    const endDifference = (monthKeyToIndex(b.end_month) ?? -1) - (monthKeyToIndex(a.end_month) ?? -1);
+                    if (endDifference) return endDifference;
+                }
+                return (a.name || '').localeCompare(b.name || '', 'zh-Hant');
+            });
         const semester = this._semesterKey();
         const months = this._semesterMonths();
         const rows = projects.map(project => {
@@ -958,11 +999,13 @@ export const employmentModule = {
             const semesterSpend = this._projectSpend(project._id, months);
             const totalSpend = this._projectSpend(project._id);
             const remaining = available === null ? null : available - semesterSpend;
-            return `<tr class="${project.status === 'archived' ? 'is-archived' : ''}">
-                <td><strong>${escapeHtml(project.name)}</strong><small>${project.status === 'archived' ? '已封存' : '進行中'}</small></td>
+            const state = project._currentState;
+            return `<tr class="${state.rank === 2 ? 'is-ended' : ''}">
+                <td><strong>${escapeHtml(project.name)}</strong></td>
+                <td><span class="project-state-badge is-${state.key}"><i class="ph ${state.icon}" aria-hidden="true"></i>${state.label}</span></td>
                 <td>${escapeHtml(project.project_number || '-')}</td>
                 <td>${escapeHtml(project.project_code || '-')}</td>
-                <td>${project.start_month ? `${formatRocMonth(project.start_month)}～${formatRocMonth(project.end_month)}` : '-'}</td>
+                <td>${formatProjectPeriod(project)}</td>
                 <td class="number-cell">${available === null ? '未設定' : formatMoney(available)}</td>
                 <td class="number-cell">${formatMoney(semesterSpend)}</td>
                 <td class="number-cell ${remaining !== null && remaining < 0 ? 'amount-neg' : ''}">${remaining === null ? '—' : formatMoney(remaining)}</td>
@@ -974,8 +1017,8 @@ export const employmentModule = {
         return `<div class="employment-toolbar"><div><h3>計畫</h3><p>業務費以目前選取學期為單位管理。</p></div><button type="button" class="btn btn-primary" onclick="app.openProjectEditor()"><i class="ph ph-plus" aria-hidden="true"></i> 新增計畫</button></div>
             ${this._renderProjectEditor()}
             <div class="table-container"><table class="project-management-table">
-                <thead><tr><th>計畫</th><th>計畫編號</th><th>計畫代碼</th><th>計畫期間</th><th>本學期可用業務費</th><th>本學期聘僱支出</th><th>預計剩餘</th><th>累計聘僱支出</th><th>操作</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="9" class="empty">尚無計畫</td></tr>'}</tbody>
+                <thead><tr><th>計畫</th><th>目前狀況</th><th>計畫編號</th><th>計畫代碼</th><th>計畫期間</th><th>本學期可用業務費</th><th>本學期聘僱支出</th><th>預計剩餘</th><th>累計聘僱支出</th><th>操作</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="10" class="empty">尚無計畫</td></tr>'}</tbody>
             </table></div>`;
     },
 
@@ -1010,7 +1053,7 @@ export const employmentModule = {
                 <div class="form-group"><label for="project-semester-budget">本學期規劃前可用業務費（選填）</label><input type="number" id="project-semester-budget" min="0" step="1" value="${budget ?? ''}"></div>
                 ${renderRocMonthField('project-start', '計畫開始月份', project.start_month, { optional: true })}
                 ${renderRocMonthField('project-end', '計畫結束月份', project.end_month, { optional: true })}
-                <div class="form-group"><label for="project-status">狀態</label><select id="project-status"><option value="active" ${project.status === 'active' ? 'selected' : ''}>進行中</option><option value="archived" ${project.status === 'archived' ? 'selected' : ''}>已封存</option></select></div>
+                <div class="form-group"><label for="project-status">管理狀態</label><select id="project-status"><option value="active" ${project.status === 'active' ? 'selected' : ''}>使用中</option><option value="archived" ${project.status === 'archived' ? 'selected' : ''}>已封存</option></select><p class="form-help">進行中或已結束會依計畫期間自動判定。</p></div>
                 <div id="project-form-error" class="form-error wide" role="alert"></div>
             </div>
             <div class="inline-editor-actions"><button type="button" class="btn btn-primary" id="btn-save-project" onclick="app.saveProject()">儲存計畫</button></div>
@@ -1117,6 +1160,7 @@ export const employmentModule = {
             const spend = this._projectSpend(project._id, this._semesterMonths());
             return {
                 '計畫名稱': project.name,
+                '目前狀況': projectCurrentState(project).label,
                 '計畫編號': project.project_number,
                 '計畫代碼': project.project_code,
                 '學期': semesterLabel(this.empAcademicYear, this.empTerm),

@@ -236,7 +236,7 @@ export const inventoryModule = {
         if (isOpen) {
             shouldReset = confirm("【開放盤點】\n是否要清空先前的盤點紀錄，重新開始新的一輪？\n\n- 按 [確定]：全部重置為未盤點(紅燈)\n- 按 [取消]：保留現有紅綠燈，僅『重新開放』編輯權限");
         } else {
-            if (!confirm("⚠️ 確定要【關閉盤點】嗎？\nUser 的所有編輯權限將被關閉，僅能檢視現有進度。")) return;
+            if (!confirm("確定要關閉盤點嗎？\nUser 的所有編輯權限將被關閉，僅能檢視現有進度。")) return;
         }
 
         const btnOpen = document.getElementById('btn-inv-open');
@@ -273,7 +273,7 @@ export const inventoryModule = {
                 await Promise.all(batchArray);
             }
             
-            this.showNotification(isOpen ? "🎉 盤點已開放！User 已獲得編輯權限。" : "🔒 盤點已關閉，User 編輯權限已鎖定。", "success");
+            this.showNotification(isOpen ? "盤點已開放，User 已獲得編輯權限。" : "盤點已關閉，User 編輯權限已鎖定。", "success");
         } catch (e) {
             this.showNotification("操作失敗: " + e.message, "error");
         } finally {
@@ -658,7 +658,7 @@ export const inventoryModule = {
                 await updateDoc(doc(db, "instruments", instId), { Linked_Property_IDs: updatedTags });
             }
             await updateDoc(doc(db, "inventory", propId), { Location: "" });
-            this.showNotification("✅ 已成功解除綁定！", 'success');
+            this.showNotification("已成功解除綁定", 'success');
             if (this.currentEditingInstTags && this.currentEditingInstTags.includes(propId)) {
                 this.currentEditingInstTags = this.currentEditingInstTags.filter(id => id !== propId);
                 this.renderModalInstTags();

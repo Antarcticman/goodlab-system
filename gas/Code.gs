@@ -52,10 +52,11 @@ function testDutyReminderToMe() {
     const members = fetchCollection_('members');
     const dutyRecords = fetchCollection_('duty_records');
     const record = resolveDutyRecordForWeek_(dutyRecords, weekId);
+    const dutyRoster = getDutyRoster_(members);
     const person = record && record.assigned_to
-      ? members.find(function (member) { return member.Student_ID === record.assigned_to; })
+      ? dutyRoster.find(function (member) { return member.Student_ID === record.assigned_to; })
       : null;
-    const previewPerson = person || { Name_Ch: '值日生同學', Student_ID: 'PREVIEW' };
+    const previewPerson = person || dutyRoster[0] || { Name_Ch: '值日生同學', Student_ID: 'PREVIEW' };
 
     sendEmail_(buildDutyReminderMessage_(previewPerson, weekId, recipient, true, record));
     console.log('值日提醒預覽已寄給目前 GAS 帳號：' + recipient);
@@ -70,14 +71,23 @@ function testDutyCompletionToMe() {
     const weekId = mondayDateKey_(new Date());
     const members = fetchCollection_('members');
     const dutyRecords = fetchCollection_('duty_records');
+    const dutyRoster = getDutyRoster_(members);
+    const previewId = dutyRoster[0] ? dutyRoster[0].Student_ID : 'PREVIEW';
     const existing = dutyRecords.find(function (item) { return item._id === weekId; });
+    const existingIsEligible = existing
+      && dutyRoster.some(function (member) {
+        return member.Student_ID === (existing.scheduled_to || existing.assigned_to);
+      })
+      && dutyRoster.some(function (member) {
+        return member.Student_ID === (existing.assigned_to || existing.scheduled_to);
+      });
     const previewRecord = Object.assign({
       _id: weekId,
       week_start: weekId,
-      scheduled_to: members[0] ? members[0].Student_ID : 'PREVIEW',
-      assigned_to: members[0] ? members[0].Student_ID : 'PREVIEW',
+      scheduled_to: previewId,
+      assigned_to: previewId,
       submitted: true
-    }, existing || {});
+    }, existingIsEligible ? existing : {});
     previewRecord.note = previewRecord.note || '預覽範例：已補充手套；IPA 已叫貨，預計下週到。';
     previewRecord.submitted = true;
 
@@ -105,7 +115,11 @@ function checkDutyReminder() {
     const person = members.find(function (member) {
       return member.Student_ID === record.assigned_to;
     });
-    if (!person || !isEmail_(person.Email)) {
+    if (!person || !isDutyRosterMember_(person)) {
+      console.log('本週輪值紀錄指向非在學輪值成員，已停止寄信：' + record.assigned_to);
+      return;
+    }
+    if (!isEmail_(person.Email)) {
       throw new Error('本週值日生沒有有效 Email：' + record.assigned_to);
     }
 
@@ -638,22 +652,40 @@ function getNextDutyMember_(record, members, dutyRecords) {
   const weekId = record.week_start || record._id;
   const nextWeekId = shiftDateKey_(weekId, 7);
   const nextRecord = dutyRecords.find(function (item) { return item._id === nextWeekId; });
+  const roster = getDutyRoster_(members);
   const nextAssignedTo = nextRecord && (nextRecord.assigned_to || nextRecord.scheduled_to);
   if (nextAssignedTo) {
-    const explicitlyAssigned = members.find(function (member) { return member.Student_ID === nextAssignedTo; });
+    const explicitlyAssigned = roster.find(function (member) { return member.Student_ID === nextAssignedTo; });
     if (explicitlyAssigned) return explicitlyAssigned;
   }
 
-  const roster = members
-    .filter(function (member) {
-      return member.Degree === 'Master' && member.Role !== 'Admin' && member.Status === 'Active';
-    })
-    .sort(function (a, b) { return String(a.Student_ID).localeCompare(String(b.Student_ID)); });
   if (!roster.length) return null;
 
   const scheduledTo = record.scheduled_to || record.assigned_to;
   const currentIndex = roster.findIndex(function (member) { return member.Student_ID === scheduledTo; });
-  return roster[(currentIndex >= 0 ? currentIndex + 1 : 0) % roster.length];
+  if (currentIndex >= 0) return roster[(currentIndex + 1) % roster.length];
+  return roster.find(function (member) {
+    return String(member.Student_ID).localeCompare(
+      String(scheduledTo || ''), 'en', { numeric: true, sensitivity: 'base' }
+    ) > 0;
+  }) || roster[0];
+}
+
+function isDutyRosterMember_(member) {
+  return Boolean(member)
+    && member.Degree === 'Master'
+    && member.Role !== 'Admin'
+    && member.Status === 'Active';
+}
+
+function getDutyRoster_(members) {
+  return members
+    .filter(isDutyRosterMember_)
+    .sort(function (a, b) {
+      return String(a.Student_ID).localeCompare(
+        String(b.Student_ID), 'en', { numeric: true, sensitivity: 'base' }
+      );
+    });
 }
 
 function dutyCompletionPropertyKey_(weekId) {

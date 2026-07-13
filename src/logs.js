@@ -147,11 +147,16 @@ export const logsModule = {
             data = this.data.logs.find(l => (l.Log_ID === inputData || l.id === inputData));
             if (!data) {
                 console.error("找不到對應的維修紀錄 ID:", inputData);
-                this.showNotification("❌ 找不到該筆紀錄，請重新整理頁面。", "error");
+                this.showNotification("找不到該筆紀錄，請重新整理頁面。", "error");
                 return;
             }
         } else if (inputData && typeof inputData === 'object') {
             data = inputData;
+        }
+
+        if (data && !isAdmin) {
+            this.showNotification('一般成員只能新增設備問題回報。', 'warning');
+            return;
         }
 
         const title = data ? '編輯維修紀錄' : '回報維修問題';
@@ -218,9 +223,15 @@ export const logsModule = {
                 else el.readOnly = isLocked;
             }
         });
+        const ownerSelect = document.getElementById('Owner_ID');
+        if (ownerSelect) ownerSelect.disabled = !isAdmin || isLocked;
 
-        // 結案欄位權限
-        const canEditSolution = isAdmin || (data && data.Status !== 'Closed');
+        // 一般成員只需要填寫回報內容；處理狀態與結案欄位由 Admin 管理。
+        ['Log_Status', 'Solution', 'Date_Resolved'].forEach(id => {
+            const fieldGroup = document.getElementById(id)?.closest('.form-group');
+            if (fieldGroup) fieldGroup.style.display = isAdmin ? '' : 'none';
+        });
+        const canEditSolution = isAdmin;
         document.getElementById('Solution').readOnly = !canEditSolution;
         document.getElementById('Date_Resolved').disabled = !canEditSolution;
         document.getElementById('Log_Status').disabled = !isAdmin;
@@ -298,6 +309,14 @@ export const logsModule = {
             payload[key] = el.value;
         });
 
+        if (this.currentRole !== 'Admin') {
+            payload.Owner_ID = this.currentMember?.Student_ID || '';
+            payload.Reporter_UID = this.currentUser?.uid || '';
+            payload.Status = 'Open';
+            payload.Solution = '';
+            payload.Date_Resolved = '';
+        }
+
         if (!payload.Instrument_ID) { alert("請選擇儀器"); return; }
         if (!payload.Problem_Desc) { alert("請填寫問題描述"); return; }
 
@@ -311,7 +330,7 @@ export const logsModule = {
             this.showNotification("維修紀錄儲存成功", "success");
             // 若有需要，可以在此補上 this.renderLogs(); 讓畫面自動更新
         } catch (e) {
-            this.showNotification("❌ 發生錯誤: " + e.message, 'error');
+            this.showNotification("發生錯誤：" + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;

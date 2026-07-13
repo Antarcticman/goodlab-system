@@ -6,7 +6,7 @@
  */
 
 // === 基礎設施 ===
-import { db, collection, onSnapshot, doc, deleteDoc } from './firebase.js';
+import { db, collection, onSnapshot, doc, deleteDoc, query, where } from './firebase.js';
 import { showNotification, closeModal, populateLocationSelects, fillMemberSelect, fillPayerSelect, copyEmail } from './ui.js';
 import { generateId, formatDateForInput, getMemberName, calculateGrade } from './utils.js';
 import { LOCATIONS, LOCATIONS_WITH_OTHER } from './constants.js';
@@ -21,6 +21,7 @@ import { inventoryModule } from './inventory.js';
 import { dutyModule } from './duty.js';
 import { routineModule } from './routine.js';
 import { employmentModule } from './employment.js';
+import { dashboardModule } from './dashboard.js';
 
 // === 主 App 物件 ===
 const app = {
@@ -28,7 +29,7 @@ const app = {
     data: {
         members: [], instruments: [], logs: [], accounting: [], inventory: [],
         duty_records: [], duty_state: null,
-        routines: [],
+        routines: [], bulletins: [],
         projects: [], employments: []
     },
     invSortState: { key: 'Property_ID', direction: 'asc' },
@@ -147,7 +148,7 @@ const app = {
 
     // --- 共用刪除邏輯 ---
     deleteRecord: async function(collectionName, id, modalId) {
-        if (!confirm("⚠️ 確定要永久刪除這筆資料嗎？刪除後無法復原！")) return;
+        if (!confirm("確定要永久刪除這筆資料嗎？刪除後無法復原。")) return;
         
         const btn = document.getElementById(`btn-del-${modalId.charAt(0)}`);
         if (btn) { btn.innerText = "刪除中..."; btn.disabled = true; }
@@ -157,7 +158,7 @@ const app = {
             this.closeModal(modalId);
             this.showNotification("刪除成功", 'success');
         } catch (e) {
-            this.showNotification("❌ 刪除失敗: " + e.message, 'error');
+            this.showNotification("刪除失敗：" + e.message, 'error');
         } finally {
             if (btn) { btn.innerText = "刪除"; btn.disabled = false; }
         }
@@ -179,7 +180,7 @@ const app = {
             return ['overview', 'logs', 'routine', 'duty', 'inventory', 'accounting', 'members', 'employment', 'instruments'];
         }
         if (this.currentRole === 'User') {
-            return ['overview', 'logs', 'duty', 'inventory', 'members', 'instruments'];
+            return ['overview', 'duty', 'inventory', 'members', 'instruments'];
         }
         return ['welcome'];
     },
@@ -324,6 +325,17 @@ const app = {
             duty_records: { dataKey: 'duty_records', withId: true, onData: () => { this.renderDuty(); this.renderOverview(); } },
             accounting: { dataKey: 'accounting', withId: false, onData: () => { this.renderAccounting(); this.calcDashboard(); this.renderOverview(); } },
             routines: { dataKey: 'routines', withId: true, onData: () => { this.renderRoutine(); this.renderOverview(); } },
+            public_routines: {
+                collectionName: 'routines', dataKey: 'routines', withId: true,
+                source: () => query(collection(db, 'routines'), where('visible_to_users', '==', true)),
+                onData: () => this.renderOverview()
+            },
+            bulletins: { dataKey: 'bulletins', withId: true, onData: () => this.renderOverview() },
+            public_bulletins: {
+                collectionName: 'bulletins', dataKey: 'bulletins', withId: true,
+                source: () => query(collection(db, 'bulletins'), where('published', '==', true)),
+                onData: () => this.renderOverview()
+            },
             projects: { dataKey: 'projects', withId: true, onData: () => this.renderEmployment() },
             employments: { dataKey: 'employments', withId: true, onData: () => this.renderEmployment() }
         };
@@ -333,8 +345,8 @@ const app = {
         const allowedByProfile = {
             Anonymous: [],
             Guest: ['members'],
-            User: ['members', 'instruments', 'logs', 'inventory', 'duty_records'],
-            Admin: ['members', 'instruments', 'logs', 'inventory', 'duty_records', 'accounting', 'routines', 'projects', 'employments']
+            User: ['members', 'instruments', 'inventory', 'duty_records', 'public_routines', 'public_bulletins'],
+            Admin: ['members', 'instruments', 'logs', 'inventory', 'duty_records', 'accounting', 'routines', 'bulletins', 'projects', 'employments']
         };
         const allowed = new Set(allowedByProfile[profile] || []);
         const config = this.getRealtimeConfig();
@@ -350,14 +362,15 @@ const app = {
         allowed.forEach(name => {
             if (this.realtimeUnsubscribers.has(name)) return;
             const item = config[name];
-            const unsubscribe = onSnapshot(collection(db, name), snapshot => {
+            const source = item.source ? item.source() : collection(db, item.collectionName || name);
+            const unsubscribe = onSnapshot(source, snapshot => {
                 this.data[item.dataKey] = snapshot.docs.map(document => item.withId ? ({ _id: document.id, ...document.data() }) : document.data());
                 item.onData();
             }, error => {
                 this.data[item.dataKey] = [];
                 if (name === 'members') this.membersLoaded = true;
                 console.warn(`[GOODLAB] ${name} listener unavailable: ${error.code || error.message}`);
-                if (this.currentUser) this.showNotification(`無法載入${name}資料，請重新整理或聯絡管理員。`, 'error');
+                if (this.currentUser) this.showNotification(`無法載入${item.collectionName || name}資料，請重新整理或聯絡管理員。`, 'error');
                 item.onData();
             });
             this.realtimeUnsubscribers.set(name, unsubscribe);
@@ -454,6 +467,7 @@ Object.assign(app, inventoryModule);
 Object.assign(app, dutyModule);
 Object.assign(app, routineModule);
 Object.assign(app, employmentModule);
+Object.assign(app, dashboardModule);
 
 // === 全域 UX 監聽器 ===
 document.addEventListener('keydown', (e) => {

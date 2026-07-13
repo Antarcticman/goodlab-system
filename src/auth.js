@@ -136,7 +136,7 @@ export const authModule = {
 
         // ★ 安全檢查：此學號是否已被別的 Google 帳號綁走了？
         if (member.Google_UID && member.Google_UID !== this.currentUser.uid) {
-            this.showNotification("🚫 綁定失敗：此學號已被其他 Google 帳戶使用！", "error");
+            this.showNotification("綁定失敗：此學號已被其他 Google 帳戶使用。", "error");
             return;
         }
 
@@ -188,8 +188,8 @@ export const authModule = {
                 arr.forEach(el => { if(el) el.style.display = 'flex'; }); 
             });
         } else if (this.currentRole === 'User') {
-            // User：可看總覽、儀器、維修、產編、值日生與人員
-            ['overview', 'instruments', 'logs', 'inventory', 'duty', 'members'].forEach(id => {
+            // User：維修完整紀錄屬 Admin；一般成員由總覽直接回報問題。
+            ['overview', 'instruments', 'inventory', 'duty', 'members'].forEach(id => {
                 navMap[id].forEach(el => { if(el) el.style.display = 'flex'; });
             });
         }

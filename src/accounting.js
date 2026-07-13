@@ -6,6 +6,10 @@ import { db, doc, setDoc } from './firebase.js';
 import { generateId, formatDateForInput, getMemberName } from './utils.js';
 import { showNotification, closeModal, fillPayerSelect } from './ui.js';
 
+function cleanAccountingDescription(value) {
+    return String(value || '').replace(/^(?:🏧|💰)\s*/u, '');
+}
+
 export const accountingModule = {
 
     getAccountingSummary: function() {
@@ -153,6 +157,7 @@ export const accountingModule = {
 
         tbody.innerHTML = filtered.map(acc => {
             const payerName = getMemberName(this.data.members, acc.Payer);
+            const description = cleanAccountingDescription(acc.Description);
             const amt = parseFloat(acc.Amount);
             const isFund = acc.Payer === 'Fund';
             let statusIcon = '<i class="ph-fill ph-circle" style="color: var(--success); font-size:1.2rem;"></i>'; 
@@ -167,14 +172,14 @@ export const accountingModule = {
             <tr onclick="app.openAccModal('${acc.Txn_ID}')" style="cursor:pointer">
                 <td style="text-align:center; font-size:1.2rem;">${statusIcon}</td>
                 <td>${formatDateForInput(acc.Date).substring(5)}</td> <td>
-                    <div class="mobile-truncate" title="${acc.Description}">${acc.Description}</div>
+                    <div class="mobile-truncate" title="${description}">${description}</div>
                     <br><small style="color:#888">${this.getAccTypeName(acc.Type)}</small>
                 </td>
                 <td style="text-align:right; font-weight:bold;" class="${amt >= 0 ? 'amount-pos' : 'amount-neg'}">${amt}</td>
                 <td class="hide-mobile">${payerName}</td>
                 <td class="hide-mobile">${showRecharge}</td>
                 <td class="hide-mobile">${datePayback}</td>
-                <td style="text-align:center;"><button class="btn btn-sm btn-secondary">✏️</button></td>
+                <td style="text-align:center;"><button type="button" class="btn btn-sm btn-secondary" aria-label="編輯帳務"><i class="ph ph-pencil-simple" aria-hidden="true"></i></button></td>
             </tr>`;
         }).join('');
     },
@@ -204,7 +209,7 @@ export const accountingModule = {
             document.getElementById('Txn_ID').value = acc.Txn_ID;
             document.getElementById('Acc_Type').value = acc.Type;
             document.getElementById('Acc_Date').value = formatDateForInput(acc.Date);
-            document.getElementById('Acc_Description').value = acc.Description;
+            document.getElementById('Acc_Description').value = cleanAccountingDescription(acc.Description);
             document.getElementById('Acc_Amount').value = acc.Amount;
             document.getElementById('Acc_Payer').value = acc.Payer;
             document.getElementById('Recharge_Date').value = formatDateForInput(acc.Recharge_Date);
@@ -251,14 +256,14 @@ export const accountingModule = {
 
         // ★ 自動化防呆：提款或匯入時，自動填寫名稱
         if (type === 'Withdraw') {
-            descInput.value = "🏧 銀行提款";
+            descInput.value = "銀行提款";
             this.setFundSource('Bank');
         } else if (type === 'Income') {
-            descInput.value = "💰 匯入公積金";
+            descInput.value = "匯入公積金";
             // Income 不強制設為 Bank，讓 User 可以自己選 Bank 或 Cash
         } else {
             // 切換回報帳/內帳時，清空預設字
-            if(descInput.value === "🏧 銀行提款" || descInput.value === "💰 匯入公積金") {
+            if (["銀行提款", "匯入公積金", "🏧 銀行提款", "💰 匯入公積金"].includes(descInput.value)) {
                 descInput.value = "";
             }
         }
@@ -342,7 +347,7 @@ export const accountingModule = {
         };
         if (isNew) payload.Created_At = now;
 
-        if (!payload.Description || !payload.Amount) { showNotification("⚠️ 請填寫項目和金額", 'error'); return; }
+        if (!payload.Description || !payload.Amount) { showNotification("請填寫項目和金額", 'error'); return; }
 
         const btn = document.getElementById('btn-save-a');
         btn.innerText = "儲存中...";
@@ -352,7 +357,7 @@ export const accountingModule = {
             await setDoc(doc(db, "accounting", payload.Txn_ID), payload);
             closeModal('acc-modal');
         } catch (e) {
-            showNotification("❌ 發生錯誤: " + e.message, 'error');
+            showNotification("發生錯誤：" + e.message, 'error');
         } finally {
             btn.innerText = "儲存";
             btn.disabled = false;

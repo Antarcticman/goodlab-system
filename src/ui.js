@@ -111,7 +111,7 @@ export function fillPayerSelect(selectId, members) {
     const memberOpts = members.filter(m => m.Status === 'Active').map(m =>
         `<option value="${m.Student_ID}">${m.Name_Ch}</option>`
     ).join('');
-    select.innerHTML = `<option value="Fund">🏦 公積金戶頭 (Fund)</option>` + memberOpts;
+    select.innerHTML = `<option value="Fund">公積金戶頭 (Fund)</option>` + memberOpts;
 }
 
 // === 複製到剪貼簿 ===

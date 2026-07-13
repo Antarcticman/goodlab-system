@@ -78,22 +78,27 @@ export const SUPPLY_VENDORS = {
 // 值日生補充說明（顯示在頁面底部）
 export const DUTY_NOTES = [
     {
-        title: '⚠️ 氮氣鋼瓶叫貨注意',
+        icon: 'ph-warning-circle',
+        title: '氮氣鋼瓶叫貨注意',
         content: '機房內掛牌子的空瓶才算，幾瓶空瓶就叫幾瓶。記得跟廠商確認更換日期及時間，若無法配合廠商時間請提前一晚將空瓶搬到走廊。'
     },
     {
-        title: '💨 RTA 特殊氣體',
+        icon: 'ph-wind',
+        title: 'RTA 特殊氣體',
         content: 'RTA 的橋藝氣體 (0.1% H₂、純 N₂) 使用者用完自己叫，不屬於值日生工作。'
     },
     {
-        title: '🗑️ 資源回收車時間 & 地點',
+        icon: 'ph-recycle',
+        title: '資源回收車時間與地點',
         content: '週一至週五<br>10:20 ~ 10:30　椰林小道 生化所與新生大樓之間<br>15:05 ~ 15:15　椰林小道 電一對面'
     },
     {
-        title: '💡 日光燈、化學藥劑、膠帶等',
+        icon: 'ph-lightbulb',
+        title: '日光燈、化學藥劑、膠帶等',
         content: '使用者自行叫貨，不屬於值日生工作。'
     },
     {
+        icon: 'ph-address-book',
         title: '其他廠商聯絡方式',
         content: '其他耗材或設備廠商請查看實驗室共用聯絡表。',
         link: {

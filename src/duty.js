@@ -19,6 +19,7 @@ const escapeDutyHtml = value => String(value ?? '').replace(/[&<>'"]/g, characte
 export const dutyModule = {
 
     _dutyCarryoverSyncWeek: null,
+    _dutyRosterSyncWeek: null,
 
     // === 取得當週 ID (ISO Week 的週一日期字串，e.g. "2026-06-09") ===
     _getDutyWeekId: function(date) {
@@ -44,7 +45,12 @@ export const dutyModule = {
     _getNextDutyMember: function(roster, scheduledTo) {
         if (!roster.length) return null;
         const currentIndex = roster.findIndex(member => member.Student_ID === scheduledTo);
-        return roster[(currentIndex >= 0 ? currentIndex + 1 : 0) % roster.length];
+        if (currentIndex >= 0) return roster[(currentIndex + 1) % roster.length];
+
+        // 舊紀錄可能仍指向已畢業成員；依學號順序接到下一位有效成員。
+        return roster.find(member => String(member.Student_ID).localeCompare(
+            String(scheduledTo || ''), 'en', { numeric: true, sensitivity: 'base' }
+        ) > 0) || roster[0];
     },
 
     _getLatestPreviousDutyRecord: function(weekId) {
@@ -69,6 +75,11 @@ export const dutyModule = {
         return !currentRecord.submitted
             && (currentRecord.assignment_source || 'auto') === 'auto'
             && !this._hasDutyProgress(currentRecord);
+    },
+
+    _canAutoReplaceInactiveAssignment: function(record) {
+        if (!record || record.submitted || this._hasDutyProgress(record)) return false;
+        return ['auto', 'carryover'].includes(record.assignment_source || 'auto');
     },
 
     _buildDutyRecordPayload: function(weekId, scheduledTo, source = 'auto', overrides = {}) {
@@ -108,14 +119,20 @@ export const dutyModule = {
         // 上一筆紀錄未提交時，同一位實際執行者承接新週清單；
         // 已有 Admin 指定、代班或實際進度的本週紀錄視為明確覆寫，不自動改寫。
         if (previousRecord && !previousRecord.submitted && this._canAutoCarryOver(record)) {
-            const scheduledTo = this._getScheduledDutyId(previousRecord);
-            const assignedTo = previousRecord.assigned_to || scheduledTo;
+            const previousScheduledTo = this._getScheduledDutyId(previousRecord);
+            const previousAssignedTo = previousRecord.assigned_to || previousScheduledTo;
+            const scheduledMember = roster.find(member => member.Student_ID === previousScheduledTo)
+                || this._getNextDutyMember(roster, previousScheduledTo);
+            const assignedMember = roster.find(member => member.Student_ID === previousAssignedTo)
+                || scheduledMember;
+            const scheduledTo = scheduledMember.Student_ID;
+            const assignedTo = assignedMember.Student_ID;
             return {
                 record,
                 scheduledTo,
                 assignedTo,
-                scheduledMember: this.data.members.find(member => member.Student_ID === scheduledTo),
-                member: this.data.members.find(member => member.Student_ID === assignedTo),
+                scheduledMember,
+                member: assignedMember,
                 roster,
                 carryoverFrom: previousRecord,
                 carryoverCount: Number(previousRecord.carryover_count || 0) + 1,
@@ -127,12 +144,44 @@ export const dutyModule = {
         if (record && (record.assigned_to || record.scheduled_to)) {
             const scheduledTo = this._getScheduledDutyId(record);
             const assignedTo = record.assigned_to || scheduledTo;
+            const scheduledMember = roster.find(member => member.Student_ID === scheduledTo);
+            const assignedMember = roster.find(member => member.Student_ID === assignedTo);
+            if (!record.submitted && (!scheduledMember || !assignedMember)) {
+                const fallbackMember = this._getNextDutyMember(roster, assignedTo || scheduledTo);
+                if (fallbackMember && this._canAutoReplaceInactiveAssignment(record)) {
+                    return {
+                        record,
+                        scheduledTo: fallbackMember.Student_ID,
+                        assignedTo: fallbackMember.Student_ID,
+                        scheduledMember: fallbackMember,
+                        member: fallbackMember,
+                        roster,
+                        carryoverFrom: null,
+                        carryoverCount: Number(record.carryover_count || 0),
+                        needsCarryoverSync: false,
+                        needsRosterSync: true,
+                        inactiveAssignment: assignedTo || scheduledTo
+                    };
+                }
+                return {
+                    record,
+                    scheduledTo,
+                    assignedTo,
+                    scheduledMember,
+                    member: assignedMember,
+                    roster,
+                    carryoverFrom: null,
+                    carryoverCount: Number(record.carryover_count || 0),
+                    needsCarryoverSync: false,
+                    invalidAssignment: true
+                };
+            }
             return {
                 record,
                 scheduledTo,
                 assignedTo,
-                scheduledMember: this.data.members.find(m => m.Student_ID === scheduledTo),
-                member: this.data.members.find(m => m.Student_ID === assignedTo),
+                scheduledMember: scheduledMember || this.data.members.find(m => m.Student_ID === scheduledTo),
+                member: assignedMember || this.data.members.find(m => m.Student_ID === assignedTo),
                 roster,
                 carryoverFrom: record.carried_from
                     ? this.data.duty_records.find(item => item._id === record.carried_from) || null
@@ -142,22 +191,16 @@ export const dutyModule = {
             };
         }
 
-        let nextIndex = 0;
-        if (previousRecord) {
-            const lastPerson = this._getScheduledDutyId(previousRecord);
-            const lastIdx = roster.findIndex(m => m.Student_ID === lastPerson);
-            if (lastIdx >= 0) {
-                nextIndex = (lastIdx + 1) % roster.length;
-            }
-        }
-
-        const assignedTo = roster[nextIndex].Student_ID;
+        const nextMember = previousRecord
+            ? this._getNextDutyMember(roster, this._getScheduledDutyId(previousRecord))
+            : roster[0];
+        const assignedTo = nextMember.Student_ID;
         return {
             record: null,
             scheduledTo: assignedTo,
             assignedTo,
-            scheduledMember: roster[nextIndex],
-            member: roster[nextIndex],
+            scheduledMember: nextMember,
+            member: nextMember,
             roster,
             carryoverFrom: null,
             carryoverCount: 0,
@@ -182,8 +225,16 @@ export const dutyModule = {
         if (!previousRecord || this._dutyCarryoverSyncWeek === weekId) return;
 
         this._dutyCarryoverSyncWeek = weekId;
-        const scheduledTo = this._getScheduledDutyId(previousRecord);
-        const assignedTo = previousRecord.assigned_to || scheduledTo;
+        const roster = this._getDutyRoster();
+        const previousScheduledTo = this._getScheduledDutyId(previousRecord);
+        const previousAssignedTo = previousRecord.assigned_to || previousScheduledTo;
+        const scheduledMember = roster.find(member => member.Student_ID === previousScheduledTo)
+            || this._getNextDutyMember(roster, previousScheduledTo);
+        if (!scheduledMember) return;
+        const assignedMember = roster.find(member => member.Student_ID === previousAssignedTo)
+            || scheduledMember;
+        const scheduledTo = scheduledMember.Student_ID;
+        const assignedTo = assignedMember.Student_ID;
         const carryoverCount = Number(previousRecord.carryover_count || 0) + 1;
         const payload = this._buildDutyRecordPayload(weekId, scheduledTo, 'carryover', {
             assigned_to: assignedTo,
@@ -206,6 +257,22 @@ export const dutyModule = {
             await batch.commit();
         } finally {
             if (this._dutyCarryoverSyncWeek === weekId) this._dutyCarryoverSyncWeek = null;
+        }
+    },
+
+    _syncInactiveDutyAssignment: async function(record, assignedTo, inactiveAssignment) {
+        const weekId = this._getDutyWeekId();
+        if (!record || this._dutyRosterSyncWeek === weekId) return;
+        this._dutyRosterSyncWeek = weekId;
+        try {
+            await updateDoc(doc(db, 'duty_records', record._id), {
+                scheduled_to: assignedTo,
+                assigned_to: assignedTo,
+                inactive_assignment_replaced: inactiveAssignment || null,
+                updated_at: new Date().toISOString()
+            });
+        } finally {
+            if (this._dutyRosterSyncWeek === weekId) this._dutyRosterSyncWeek = null;
         }
     },
 
@@ -238,6 +305,26 @@ export const dutyModule = {
         }
 
         const result = this._getCurrentDutyPerson();
+        if (result?.needsRosterSync && result.record) {
+            container.innerHTML = `<div class="duty-card duty-carryover-loading" role="status">
+                <i class="ph ph-spinner ph-spin" aria-hidden="true"></i>
+                <div><strong>正在更新輪值名單</strong><br><span>舊紀錄指向非在學成員，系統正在接到下一位有效成員。</span></div>
+            </div>`;
+            this._syncInactiveDutyAssignment(result.record, result.assignedTo, result.inactiveAssignment).catch(error => {
+                container.innerHTML = `<div class="duty-card duty-carryover-error" role="alert">
+                    <div><strong>輪值名單更新失敗</strong><br><span>${escapeDutyHtml(error.message)}</span></div>
+                    <button class="btn btn-secondary" type="button" onclick="app.renderDuty()">重試</button>
+                </div>`;
+            });
+            return;
+        }
+        if (result?.invalidAssignment) {
+            container.innerHTML = `<div class="duty-card duty-carryover-error" role="alert">
+                <div><strong>本週輪值需要重新對齊</strong><br><span>目前紀錄指向非在學成員，為避免改動已有進度，系統不會自動換人。</span></div>
+                ${this.currentRole === 'Admin' ? '<button class="btn btn-primary" type="button" onclick="app.openCurrentDutyAlignmentModal()">對齊本週輪值</button>' : ''}
+            </div>`;
+            return;
+        }
         if (result?.needsCarryoverSync && result.carryoverFrom) {
             const previousName = this.getMemberName(result.assignedTo);
             container.innerHTML = `<div class="duty-card duty-carryover-loading" role="status">
@@ -275,7 +362,7 @@ export const dutyModule = {
         const calculatedNextPerson = this._getNextDutyMember(roster, scheduledTo);
         const nextAssignedTo = nextWeekRecord?.assigned_to || nextWeekRecord?.scheduled_to;
         const nextPerson = nextAssignedTo
-            ? this.data.members.find(m => m.Student_ID === nextAssignedTo) || calculatedNextPerson
+            ? roster.find(m => m.Student_ID === nextAssignedTo) || calculatedNextPerson
             : calculatedNextPerson;
         const carryoverStatusHtml = carryoverFrom
             ? `<span class="status-badge status-badge-warning"><i class="ph ph-arrow-bend-down-right" aria-hidden="true"></i> 上週未完成，已順延${carryoverCount > 1 ? ` ${carryoverCount} 週` : ''}</span>`
@@ -329,11 +416,12 @@ export const dutyModule = {
         const cleaningHtml = DUTY_CLEANING_TASKS.map(task => {
             const checked = record && record.cleaning && record.cleaning[task.id] ? 'checked' : '';
             const disabled = !canEdit || (record && record.submitted) ? 'disabled' : '';
-            return `<li>
+            return `<li class="duty-cleaning-item">
                 <input type="checkbox" ${checked} ${disabled}
+                    aria-label="完成${escapeDutyHtml(task.name)}"
                     onchange="app.toggleDutyItem('cleaning', '${task.id}', this.checked)">
-                <div>
-                    <div class="duty-item-name">${task.name}</div>
+                <div class="duty-item-content">
+                    <div class="duty-item-heading"><span class="duty-item-name">${task.name}</span></div>
                     <div class="duty-item-detail">${task.detail}</div>
                 </div>
             </li>`;
@@ -372,16 +460,17 @@ export const dutyModule = {
                     </div>
                 </details>` : '';
 
-            return `<li>
+            return `<li class="duty-supply-item">
                 <input type="checkbox" ${checked} ${disabled}
+                    aria-label="完成${escapeDutyHtml(item.name)}清點"
                     onchange="app.toggleDutyItem('supplies', '${item.id}', this.checked)">
-                <div style="flex:1;">
-                    <div class="duty-item-name">
-                        ${item.name} ${tooltipHtml}
+                <div class="duty-item-content">
+                    <div class="duty-item-heading">
+                        <span class="duty-item-name">${item.name}</span>${tooltipHtml}
                     </div>
                     <div class="duty-item-meta">
-                        <span>⚠️ ${item.threshold} ${item.unit}</span>
-                        <span>📍 ${item.location}</span>
+                        <span><i class="ph ph-package" aria-hidden="true"></i>${item.threshold} ${item.unit}</span>
+                        <span><i class="ph ph-map-pin" aria-hidden="true"></i>${item.location}</span>
                     </div>
                 </div>
             </li>`;
@@ -484,8 +573,8 @@ export const dutyModule = {
             <div class="duty-card" style="background:#f8fafc;">
                 <div class="duty-card-header"><h3><i class="ph ph-info" aria-hidden="true"></i> 補充說明</h3></div>
                 ${DUTY_NOTES.map(note => `
-                    <div style="margin-bottom:12px; padding:10px 14px; background:white; border-radius:8px; border-left:3px solid var(--primary);">
-                        <div style="font-weight:600; margin-bottom:4px;">${note.title}</div>
+                    <div class="duty-note-item">
+                        <div class="duty-note-title"><i class="ph ${escapeDutyHtml(note.icon || 'ph-info')}" aria-hidden="true"></i>${note.title}</div>
                         <div style="font-size:0.9rem; color:var(--text-muted); line-height:1.6;">${note.content}</div>
                         ${note.link ? `<a class="duty-resource-link" href="${escapeDutyHtml(note.link.url)}" target="_blank" rel="noopener noreferrer">
                             <i class="ph ph-table" aria-hidden="true"></i>${escapeDutyHtml(note.link.label)}
@@ -545,7 +634,7 @@ export const dutyModule = {
                 updated_at: new Date().toISOString()
             });
         } catch (e) {
-            this.showNotification('❌ 更新失敗: ' + e.message, 'error');
+            this.showNotification('更新失敗：' + e.message, 'error');
         }
     },
 
@@ -592,7 +681,7 @@ export const dutyModule = {
         const allSupplies = DUTY_SUPPLY_ITEMS.every(t => record.supplies && record.supplies[t.id]);
 
         if (!allCleaning || !allSupplies) {
-            this.showNotification('⚠️ 請先完成所有清潔與耗材清點項目', 'warning');
+            this.showNotification('請先完成所有清潔與耗材清點項目', 'warning');
             return;
         }
 
@@ -617,7 +706,7 @@ export const dutyModule = {
                 submitted_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             });
-            this.showNotification('✅ 本週值日生工作已提交！', 'success');
+            this.showNotification('本週值日生工作已提交', 'success');
 
             try {
                 await this._ensureNextWeekRecord(scheduledTo);
@@ -625,7 +714,7 @@ export const dutyModule = {
                 this.showNotification('本週已提交，但下週輪值建立失敗；請由 Admin 檢查：' + nextWeekError.message, 'warning');
             }
         } catch (e) {
-            this.showNotification('❌ 提交失敗: ' + e.message, 'error');
+            this.showNotification('提交失敗：' + e.message, 'error');
             if (button) {
                 button.disabled = false;
                 button.innerHTML = '<i class="ph ph-check-circle" aria-hidden="true"></i> 提交本週值日生工作';
@@ -850,9 +939,9 @@ export const dutyModule = {
             });
             this.closeModal('substitute-modal');
             document.getElementById('substitute-modal')?.remove();
-            this.showNotification('📨 代班邀請已送出！', 'success');
+            this.showNotification('代班邀請已送出', 'success');
         } catch (e) {
-            this.showNotification('❌ 送出失敗: ' + e.message, 'error');
+            this.showNotification('送出失敗：' + e.message, 'error');
         }
     },
 
@@ -870,9 +959,9 @@ export const dutyModule = {
                 substitute_from: originalAssignee,
                 updated_at: new Date().toISOString()
             });
-            this.showNotification('✅ 已接受代班；本週工作已轉移，後續輪值順序不變。', 'success');
+            this.showNotification('已接受代班；本週工作已轉移，後續輪值順序不變。', 'success');
         } catch (e) {
-            this.showNotification('❌ 操作失敗: ' + e.message, 'error');
+            this.showNotification('操作失敗：' + e.message, 'error');
         }
     },
 
@@ -886,7 +975,7 @@ export const dutyModule = {
             });
             this.showNotification('已拒絕代班請求', 'info');
         } catch (e) {
-            this.showNotification('❌ 操作失敗: ' + e.message, 'error');
+            this.showNotification('操作失敗：' + e.message, 'error');
         }
     }
 };
