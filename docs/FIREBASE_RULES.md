@@ -41,11 +41,17 @@
                        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
-    // --- 日常維護 Routine（routines）---
+    // --- 實驗室行事（routines）---
     match /routines/{routineId} {
-      // 只有 Admin 可以讀寫（前端 UI 也只有 Admin 看得到）
-      allow read, write: if isSignedIn() &&
-                            exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      // User 只能讀取勾選為「顯示於一般成員總覽」的項目。
+      allow read: if isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        resource.data.visible_to_users == true
+      );
+
+      // 新增、修改與刪除僅限 Admin。
+      allow create, update, delete: if isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
     // --- 聘僱計畫（projects）---
@@ -99,6 +105,6 @@ service cloud.firestore {
 | Collection | 讀取 | 新增 | 修改 | 刪除 | 原因 |
 |---|---|---|---|---|---|
 | `duty_records` | 全員 | 全員 | 全員 | Admin | 值日生/代班者都需要寫入，刪除限 Admin |
-| `routines` | Admin | Admin | Admin | Admin | 前端 UI 只有 Admin 看得到 |
+| `routines` | Admin／User 僅公開項目 | Admin | Admin | Admin | User 查詢必須包含 `visible_to_users == true` |
 | `projects` | Admin | Admin | Admin | Admin | 涉及計畫經費 |
 | `employments` | Admin | Admin | Admin | Admin | 涉及薪資個資 |

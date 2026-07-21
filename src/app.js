@@ -121,8 +121,8 @@ const app = {
                 <li><strong>完成交接：</strong>可在提交前填寫補貨、叫貨或交接備註；提交後系統會寄送完成摘要與下週值日生資訊。</li>
             </ul>`,
         'routine': `
-            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">實驗室 Routine</h3>
-            <p style="margin-bottom: 10px;">管理週期性維護任務，自動追蹤下次到期日並提醒。僅 Admin 可見。</p>`,
+            <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">實驗室行事</h3>
+            <p style="margin-bottom: 10px;">管理例行工作、活動與行政期限，可設定週期性或一次性日期。僅 Admin 可編輯。</p>`,
         'employment': `
             <h3 style="color: var(--primary); border-bottom: 2px solid var(--border-color); padding-bottom: 8px; margin-bottom: 12px;">學生聘僱管理</h3>
             <p style="margin-bottom: 10px;">管理各計畫的學生聘僱紀錄，包含甘特圖與 Excel 匯出。僅 Admin 可見。</p>`
@@ -241,10 +241,10 @@ const app = {
             </div>
             ${isAdmin ? `<section class="overview-panel" aria-labelledby="overview-routine-heading">
                 <div class="overview-panel-header">
-                    <div><h3 id="overview-routine-heading">近期 Routine</h3><p>依下次更新日期排序</p></div>
+                    <div><h3 id="overview-routine-heading">近期實驗室行事</h3><p>依日期排序</p></div>
                     <button class="btn btn-secondary btn-sm" onclick="app.switchTab('routine')">查看全部</button>
                 </div>
-                <div class="overview-routine-list">${routineRows || '<div class="empty">尚無設定下次更新日期的 Routine</div>'}</div>
+                <div class="overview-routine-list">${routineRows || '<div class="empty">目前沒有近期行事</div>'}</div>
             </section>` : ''}`;
     },
 
@@ -280,7 +280,7 @@ const app = {
             'accounting': '公積金報帳',
             'inventory': '產編清點',
             'duty': '值日生工作',
-            'routine': '實驗室 Routine',
+            'routine': '實驗室行事',
             'employment': '學生聘僱'
         };
         const titleEl = document.getElementById('current-page-title');

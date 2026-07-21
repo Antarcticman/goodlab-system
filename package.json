@@ -1,11 +1,13 @@
 {
   "name": "goodlab-system",
   "version": "1.0.0",
+  "type": "module",
   "description": "",
   "main": "constants.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:routine": "node --test tests/routine-schedule.test.mjs",
     "preview": "vite preview"
   },
   "repository": {

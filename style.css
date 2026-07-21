@@ -234,7 +234,12 @@ textarea { resize: vertical; min-height: 80px; }
 }
 .modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
 .modal-header h3 { font-size: 1.25rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 8px; }
-.close { color: #94a3b8; font-size: 24px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+.close {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; padding: 0; border: 0; border-radius: 8px;
+    color: #94a3b8; background: transparent; font-size: 24px; font-weight: bold;
+    cursor: pointer; transition: color 0.2s, background 0.2s;
+}
 .close:hover { color: var(--danger); }
 .modal-body { padding: 24px; overflow-y: auto; }
 .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 12px; background: #f8fafc; border-radius: 0 0 12px 12px; }
@@ -789,8 +794,25 @@ html, body {
 .duty-carryover-error { justify-content: space-between; border-color: #fecaca; background: #fff7f7; }
 
 /* =========================================
-   Phase 5 — Routine 頁面樣式
+   實驗室行事頁面
 ========================================= */
+.routine-filter-tabs {
+    display: flex; flex-wrap: wrap; gap: 4px; width: fit-content;
+    margin-bottom: 18px; padding: 4px;
+    border: 1px solid var(--border-color); border-radius: var(--radius-md);
+    background: var(--bg-card);
+}
+.routine-filter-tab {
+    min-height: 40px; padding: 7px 14px; border: 0; border-radius: 7px;
+    color: var(--text-muted); background: transparent; font: inherit; font-weight: 600;
+    cursor: pointer; transition: color .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.routine-filter-tab:hover { color: var(--text-main); background: var(--color-surface-subtle); }
+.routine-filter-tab.active,
+.routine-filter-tab[aria-pressed="true"] {
+    color: var(--primary); background: #eff6ff; box-shadow: 0 0 0 1px #bfdbfe inset;
+}
+.routine-filter-tab:focus-visible { outline: 3px solid rgba(37, 99, 235, .24); outline-offset: 2px; }
 .routine-table {
     width: 100%; min-width: 780px; border-collapse: collapse; table-layout: fixed;
 }
@@ -816,9 +838,18 @@ html, body {
 .routine-col-actions { width: 112px; }
 .routine-complete-column { width: 72px; text-align: center !important; }
 .routine-complete-column input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--success); cursor: pointer; }
+.routine-complete-column input[type="checkbox"]:disabled { cursor: default; opacity: .78; }
+.routine-row-completed { background: #f8fafc; }
+.routine-row-completed .routine-item-cell { color: var(--text-muted); }
 .member-status { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .member-status.is-alumni { color: var(--text-muted); }
 .routine-item-cell { min-width: 0; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.routine-edit-item-name { display: block; margin-top: 5px; font-weight: 600; }
+.routine-category-label {
+    display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px;
+    border-radius: 999px; color: #475569; background: #e2e8f0;
+    font-size: .72rem; font-weight: 700;
+}
 .routine-name-link { color: var(--primary); font-weight: 600; text-decoration: none; }
 .routine-name-link i { display: inline-block; margin-left: 5px; font-size: .9rem; vertical-align: -1px; }
 .routine-name-link:hover { text-decoration: underline; }
@@ -833,16 +864,22 @@ html, body {
 }
 .routine-inline-link:hover { text-decoration: underline; }
 .routine-cycle-cell, .routine-status-cell { white-space: nowrap; }
-.routine-status-ok, .routine-status-warn, .routine-status-overdue { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; white-space: nowrap; }
+.routine-status-ok, .routine-status-warn, .routine-status-overdue,
+.routine-status-completed, .routine-status-muted { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; white-space: nowrap; }
 .routine-status-ok { color: var(--success); }
 .routine-status-warn { color: #c2410c; }
 .routine-status-overdue { color: var(--danger); }
+.routine-status-completed { color: var(--success); }
+.routine-status-muted { color: var(--text-muted); }
 .date-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.table-actions { display: flex; justify-content: center; gap: 8px; }
+.routine-action-cell { text-align: center !important; }
+.table-actions { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .btn-icon-danger { color: var(--danger); }
 .routine-edit-dialog { max-width: 620px; }
 .form-row-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .form-help { margin-top: 5px; color: var(--text-muted); font-size: 0.8rem; }
+.routine-interval-fields[hidden] { display: none; }
+.routine-schedule-help { margin: -4px 0 14px; line-height: 1.5; }
 .empty-state { padding: 48px 20px; color: var(--text-muted); text-align: center; }
 .empty-state i { display: block; margin-bottom: 10px; font-size: 2.5rem; }
 
@@ -850,6 +887,8 @@ html, body {
     .section-toolbar, .duty-card-header { align-items: stretch; flex-direction: column; }
     .section-toolbar .btn, .toolbar-actions .btn { flex: 1; }
     .form-row-two { grid-template-columns: 1fr; gap: 0; }
+    .routine-filter-tabs { width: 100%; }
+    .routine-filter-tab { flex: 1 1 calc(50% - 4px); min-height: 44px; }
     .routine-table { min-width: 720px; }
     .supply-info-tooltip summary { width: 44px; height: 44px; }
     .duty-supply-item .duty-item-heading { min-height: 44px; }

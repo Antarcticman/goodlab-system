@@ -12,6 +12,7 @@ const TIME_ZONE = 'Asia/Taipei';
 const FIRESTORE_PAGE_SIZE = 300;
 const MAX_EMAIL_LIST_ITEMS = 20;
 const DUTY_COMPLETION_SENT_PREFIX = 'DUTY_COMPLETION_SENT_';
+const TEST_RECIPIENT_EMAIL = 'f10943138@ntu.edu.tw';
 const PROPERTY_KEYS = {
   projectId: 'FIREBASE_PROJECT_ID',
   siteUrl: 'GOODLAB_SITE_URL'
@@ -19,8 +20,7 @@ const PROPERTY_KEYS = {
 
 function testSendToMe() {
   runJob_('TEST', function () {
-    const recipient = Session.getEffectiveUser().getEmail();
-    if (!recipient) throw new Error('無法取得目前 GAS 帳號 Email。');
+    const recipient = TEST_RECIPIENT_EMAIL;
 
     const members = fetchCollection_('members');
     const logs = fetchCollection_('logs');
@@ -37,7 +37,7 @@ function testSendToMe() {
           + '<li>logs：' + logs.length + ' 筆</li>'
           + '<li>routines：' + routines.length + ' 筆</li>'
           + '</ul>'
-          + '<p>此測試信寄送至建立與執行此 GAS 專案的帳號。</p>'
+          + '<p>此測試信固定寄送至 ' + escapeHtml_(TEST_RECIPIENT_EMAIL) + '。</p>'
       )
     });
   });
@@ -45,8 +45,7 @@ function testSendToMe() {
 
 function testDutyReminderToMe() {
   runJob_('TEST_DUTY_REMINDER', function () {
-    const recipient = Session.getEffectiveUser().getEmail();
-    if (!recipient) throw new Error('無法取得目前 GAS 帳號 Email。');
+    const recipient = TEST_RECIPIENT_EMAIL;
 
     const weekId = mondayDateKey_(new Date());
     const members = fetchCollection_('members');
@@ -59,14 +58,13 @@ function testDutyReminderToMe() {
     const previewPerson = person || dutyRoster[0] || { Name_Ch: '值日生同學', Student_ID: 'PREVIEW' };
 
     sendEmail_(buildDutyReminderMessage_(previewPerson, weekId, recipient, true, record));
-    console.log('值日提醒預覽已寄給目前 GAS 帳號：' + recipient);
+    console.log('值日提醒預覽已寄給測試信箱：' + recipient);
   });
 }
 
 function testDutyCompletionToMe() {
   runJob_('TEST_DUTY_COMPLETION', function () {
-    const recipient = Session.getEffectiveUser().getEmail();
-    if (!recipient) throw new Error('無法取得目前 GAS 帳號 Email。');
+    const recipient = TEST_RECIPIENT_EMAIL;
 
     const weekId = mondayDateKey_(new Date());
     const members = fetchCollection_('members');
@@ -92,7 +90,32 @@ function testDutyCompletionToMe() {
     previewRecord.submitted = true;
 
     sendEmail_(buildDutyCompletionMessage_(previewRecord, members, dutyRecords, recipient, true));
-    console.log('值日完成通知預覽已寄給目前 GAS 帳號：' + recipient);
+    console.log('值日完成通知預覽已寄給測試信箱：' + recipient);
+  });
+}
+
+function testMaintenanceSummaryToMe() {
+  runJob_('TEST_MAINTENANCE_SUMMARY', function () {
+    const recipient = TEST_RECIPIENT_EMAIL;
+
+    const logs = fetchCollection_('logs');
+    const instruments = fetchCollection_('instruments');
+    const thisMonday = mondayDateKey_(new Date());
+    const lastMonday = shiftDateKey_(thisMonday, -7);
+    const lastSunday = shiftDateKey_(thisMonday, -1);
+    const logsHtml = buildLogsSummary_(logs, instruments, lastMonday, thisMonday);
+
+    sendEmail_({
+      to: recipient,
+      subject: '【GOODLAB 測試預覽】維修週報摘要',
+      htmlBody: emailLayout_(
+        '維修紀錄週報預覽',
+        '<p style="color:#526075;">報表期間：' + lastMonday + '～' + lastSunday + '</p>'
+          + sectionHtml_('維修紀錄', logsHtml)
+          + siteLinkHtml_('查看維修紀錄', 'logs')
+      )
+    });
+    console.log('維修週報預覽已寄給測試信箱：' + recipient);
   });
 }
 
@@ -243,6 +266,7 @@ function checkWeeklyAdminReport() {
     const dutyRecords = fetchCollection_('duty_records');
     const routines = fetchCollection_('routines');
     const logs = fetchCollection_('logs');
+    const instruments = fetchCollection_('instruments');
     const accounting = fetchCollection_('accounting');
 
     const adminEmails = members
@@ -260,12 +284,12 @@ function checkWeeklyAdminReport() {
 
     const dutyHtml = buildDutySummary_(dutyRecords, members, lastMonday, thisMonday);
     const routineHtml = buildRoutineSummary_(routines, today);
-    const logsHtml = buildLogsSummary_(logs, lastMonday, thisMonday);
+    const logsHtml = buildLogsSummary_(logs, instruments, lastMonday, thisMonday);
     const accountingHtml = buildAccountingSummary_(accounting, lastMonday, thisMonday);
 
     const reportBody = '<p style="color:#526075;">報表期間：' + lastMonday + '～' + lastSunday + '</p>'
       + sectionHtml_('1. 值日生狀況', dutyHtml)
-      + sectionHtml_('2. Routine', routineHtml)
+      + sectionHtml_('2. 實驗室行事', routineHtml)
       + sectionHtml_('3. 維修紀錄', logsHtml)
       + sectionHtml_('4. 公積金異動', accountingHtml)
       + siteLinkHtml_('開啟 GOODLAB');
@@ -434,7 +458,7 @@ function buildRoutineSummary_(routines, today) {
   return html;
 }
 
-function buildLogsSummary_(logs, rangeStart, rangeEnd) {
+function buildLogsSummary_(logs, instruments, rangeStart, rangeEnd) {
   const recent = logs
     .filter(function (log) {
       const date = String(log.Date_Reported || '').slice(0, 10);
@@ -442,11 +466,31 @@ function buildLogsSummary_(logs, rangeStart, rangeEnd) {
     })
     .sort(function (a, b) { return String(b.Date_Reported || '').localeCompare(String(a.Date_Reported || '')); });
   const unresolved = logs.filter(function (log) { return log.Status !== 'Closed'; });
+  const instrumentNames = {};
+  instruments.forEach(function (instrument) {
+    const instrumentId = String(instrument.Instrument_ID || instrument._id || '').trim();
+    if (instrumentId) instrumentNames[instrumentId] = instrument.Name || instrumentId;
+  });
 
   return '<p>上週新增：<strong>' + recent.length + '</strong> 筆；目前未結案：<strong>' + unresolved.length + '</strong> 筆。</p>'
     + (recent.length ? limitedListHtml_(recent, function (log) {
-      return escapeHtml_(log.Instrument_ID || '未指定儀器')
-        + '：' + escapeHtml_(truncate_(log.Problem_Desc || '未填描述', 80));
+      const instrumentId = String(log.Instrument_ID || '').trim();
+      const instrumentName = instrumentNames[instrumentId] || instrumentId || '未指定儀器';
+      const isClosed = log.Status === 'Closed';
+      const statusLabel = isClosed ? '已結案' : '待處理';
+      const statusStyle = isClosed
+        ? 'color:#047857;background:#d1fae5;'
+        : 'color:#b91c1c;background:#fee2e2;';
+      const solutionHtml = isClosed && log.Solution
+        ? '<br><span style="color:#526075;font-size:13px;">處理：'
+          + escapeHtml_(truncate_(log.Solution, 80)) + '</span>'
+        : '';
+
+      return '<strong>' + escapeHtml_(instrumentName) + '</strong> '
+        + '<span style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:12px;font-weight:700;'
+        + statusStyle + '">' + statusLabel + '</span>'
+        + '<br><span>問題：' + escapeHtml_(truncate_(log.Problem_Desc || '未填描述', 80)) + '</span>'
+        + solutionHtml;
     }) : '<p>上週沒有新增維修紀錄。</p>');
 }
 

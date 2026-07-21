@@ -240,7 +240,7 @@ export const dashboardModule = {
 
         return `<section class="overview-panel" aria-labelledby="overview-routine-heading">
             <div class="overview-panel-header">
-                <div><h3 id="overview-routine-heading">${isAdmin ? '近期 Routine' : '近期實驗室事項'}</h3><p>依下次更新日期排序</p></div>
+                <div><h3 id="overview-routine-heading">${isAdmin ? '近期實驗室行事' : '近期行事'}</h3><p>依日期排序</p></div>
                 ${isAdmin ? '<button class="btn btn-secondary btn-sm" onclick="app.switchTab(\'routine\')">查看全部</button>' : ''}
             </div>
             <div class="overview-routine-list">${rows || '<div class="overview-empty-compact">目前沒有近期事項。</div>'}</div>

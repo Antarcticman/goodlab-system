@@ -25,7 +25,7 @@ npm run build
 - `style.css`：全站 tokens、元件與 responsive styles
 - `src/app.js`：主協調器、路由、角色化即時監聽
 - `src/auth.js`：Google 登入、綁定、Guest/User/Admin 權限
-- `src/*.js`：人員、儀器、維修、帳務、產編、值日、Routine、聘僱模組
+- `src/*.js`：人員、儀器、維修、帳務、產編、值日、實驗室行事、聘僱模組
 - `design-system/goodlab/MASTER.md`：v5 Design System 唯一真相來源
 - `gas/Code.gs`、`gas/appsscript.json`：GAS 排程寄信程式與權限設定
 - `docs/EMAIL_AUTOMATION_DECISION.md`：GAS 與 Firebase 郵件架構決策
@@ -34,14 +34,14 @@ npm run build
 
 1. 先取得 Firebase Auth 狀態。
 2. 已登入使用者只先讀取 members，以確認綁定與角色。
-3. User 只訂閱 members、instruments、logs、inventory、duty_records。
-4. Admin 才額外訂閱 accounting、routines、projects、employments。
+3. User 訂閱 members、instruments、inventory、duty_records，以及已公開的 bulletins 與 routines。
+4. Admin 才額外訂閱 logs、accounting、完整 routines、完整 bulletins、projects、employments。
 5. 登出或角色改變時解除不再需要的 subscriptions。
 
 ## 自動寄信
 
 - 值日輪值：未提交時由同一位值日生承接新週清單，完成後才前進下一位；Admin 手動指定可明確覆寫順延。
-- GAS：每週 Admin 報表、可推算順延者的值日未完成提醒、Routine 排程摘要，以及具週次防重寄的值日完成通知。
+- GAS：每週 Admin 報表、可推算順延者的值日未完成提醒、實驗室行事摘要，以及具週次防重寄的值日完成通知。
 - Firebase Cloud Functions（規劃中）：代班、財務與聘僱等需要強稽核的事件通知。
 - 舊 `GAS_WEBHOOK_URL` 與 `no-cors` 呼叫已移除；前端不得直接呼叫公開寄信 Webhook。
 

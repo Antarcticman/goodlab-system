@@ -17,12 +17,11 @@ export const LOCATIONS = [
 // 含「其他」的完整清單
 export const LOCATIONS_WITH_OTHER = [...LOCATIONS, "其他"];
 
-// Routine 任務分類
+// 實驗室行事分類
 export const ROUTINE_CATEGORIES = [
-    "機台維護",
-    "行政",
-    "實驗室環境",
-    "license購買"
+    "例行工作",
+    "活動",
+    "行政"
 ];
 
 // === 值日生 ===
